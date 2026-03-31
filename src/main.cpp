@@ -71,7 +71,7 @@ int main()
             if (user)
             {
                 std::cout << username << "登录成功！\n";
-                user->showMenu(commodityManager);
+                user->showMenu(commodityManager, userManager);
             }
             else
             {

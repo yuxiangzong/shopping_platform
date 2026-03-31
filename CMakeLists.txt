@@ -8,6 +8,8 @@ add_executable(shopping_platform
     src/main.cpp
     src/User.cpp
     src/Commodity.cpp
+    src/Order.cpp
+    src/ShoppingCart.cpp
 )
 
 target_include_directories(shopping_platform PRIVATE include)

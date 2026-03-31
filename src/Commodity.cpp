@@ -1,19 +1,7 @@
 #include <iostream>
 #include <fstream>
-#include "Commodity.h"
 #include "nlohmann/json.hpp"
-
-// Commodity类实现
-Commodity::Commodity(const std::string &name, const std::string &merchant, const std::string &description, double basePrice, int storage, double discount)
-    : _name(name), _description(description), _merchant(merchant), _basePrice(basePrice), _discount(discount), _storage(storage) {}
-
-std::string Commodity::getName() const { return _name; }
-std::string Commodity::getDescription() const { return _description; }
-std::string Commodity::getMerchant() const { return _merchant; }
-double Commodity::getBasePrice() const { return _basePrice; }
-double Commodity::getPrice() const { return _basePrice * _discount; }
-double Commodity::getDiscount() const { return _discount; }
-int Commodity::getStorage() const { return _storage; }
+#include "Commodity.h"
 
 bool Commodity::setBasePrice(double price)
 {
@@ -62,29 +50,18 @@ void Commodity::print() const
     std::cout << "库存: " << getStorage() << "件\n";
 }
 
-// Food类实现
-std::string Food::getCommodityType() const { return "Food"; }
-
-// Clothes类实现
-std::string Clothes::getCommodityType() const { return "Clothes"; }
-
-// Book类实现
-std::string Book::getCommodityType() const { return "Book"; }
-
-// Electronics类实现
-std::string Electronics::getCommodityType() const { return "Electronics"; }
-
-// CommodityManager类实现
 CommodityManager::CommodityManager() { loadCommodities(); }
+
 CommodityManager::~CommodityManager()
 {
     saveCommodities();
-    std::cout << "保存商品数据到文件：" << _filename << std::endl;
+    std::cout << "商品信息已保存" << std::endl;
     for (Commodity *commodity : _commodities)
     {
         delete commodity;
     }
 }
+
 bool CommodityManager::loadCommodities()
 {
     std::ifstream infile(_filename);
@@ -195,18 +172,29 @@ void CommodityManager::showCommodities(std::vector<Commodity *> commodities) con
 
 std::vector<Commodity *> CommodityManager::findCommodity(const std::string &name) const
 {
-    // 如果搜索条件为空，则返回所有商品
     if (name.empty())
     {
         return _commodities;
     }
     std::vector<Commodity *> results;
-    // 搜索包含指定名称的商品
-    for (Commodity *commodity : _commodities)
+    for (const Commodity *commodity : _commodities)
     {
-        if (commodity->getName().find(name) != std::string::npos || commodity->getMerchant().find(name) != std::string::npos)
+        if (commodity->getName().find(name) != std::string::npos)
         {
-            results.push_back(commodity);
+            results.push_back(const_cast<Commodity *>(commodity));
+        }
+    }
+    return results;
+}
+
+std::vector<Commodity *> CommodityManager::getCommodityByMerchant(const std::string &merchantName) const
+{
+    std::vector<Commodity *> results;
+    for (const Commodity *commodity : _commodities)
+    {
+        if (commodity->getMerchant() == merchantName)
+        {
+            results.push_back(const_cast<Commodity *>(commodity));
         }
     }
     return results;
@@ -215,7 +203,7 @@ std::vector<Commodity *> CommodityManager::findCommodity(const std::string &name
 void CommodityManager::manageCommodity(const std::string &merchant)
 {
     std::cout << "\n===== 商品信息管理菜单 =====\n";
-    std::vector<Commodity *> my_commodities = findCommodity(merchant); // 查找属于当前用户的商品
+    std::vector<Commodity *> my_commodities = getCommodityByMerchant(merchant);
     if (my_commodities.empty())
     {
         std::cout << "当前没有可管理的商品" << std::endl;
@@ -242,13 +230,13 @@ void CommodityManager::manageCommodity(const std::string &merchant)
     while (true)
     {
         std::cout << "\n当前商品: " << selected->getName() << "，类型：" << selected->getCommodityType() << std::endl;
+        std::cout << "0. 退出商品信息管理\n";
         std::cout << "1. 修改原价\n";
         std::cout << "2. 修改库存\n";
         std::cout << "3. 修改折扣\n";
         std::cout << "4. 查看商品详细信息\n";
-        std::cout << "0. 退出商品信息管理\n";
         std::cout << "选择要执行的操作: ";
-        while (!(std::cin >> choice) || choice > 4)
+        while (!(std::cin >> choice) || choice > 5)
         {
             std::cin.clear();
             std::cin.ignore(100, '\n');
