@@ -3,6 +3,8 @@
 #include "nlohmann/json.hpp"
 #include "Commodity.h"
 
+// ==================== Commodity ====================
+
 bool Commodity::setBasePrice(double price)
 {
     if (price < 0)
@@ -50,8 +52,9 @@ void Commodity::print() const
     std::cout << "库存: " << getStorage() << "件\n";
 }
 
-CommodityManager::CommodityManager() { loadCommodities(); }
+// ==================== CommodityManager ====================
 
+CommodityManager::CommodityManager() { loadCommodities(); }
 CommodityManager::~CommodityManager()
 {
     saveCommodities();
@@ -130,9 +133,9 @@ bool CommodityManager::addCommodity(const std::string &type, const std::string &
     }
     for (const Commodity *commodity : _commodities)
     {
-        if (commodity->getName() == name && commodity->getCommodityType() == type)
+        if (commodity->getName() == name)
         {
-            std::cerr << name << " 已存在于" << type << "类型中, 无法添加" << std::endl;
+            std::cerr << name << "已经存在" << std::endl;
             return false;
         }
     }
@@ -172,11 +175,13 @@ void CommodityManager::showCommodities(std::vector<Commodity *> commodities) con
 
 std::vector<Commodity *> CommodityManager::findCommodity(const std::string &name) const
 {
+    // 如果搜索条件为空，则返回所有商品
     if (name.empty())
     {
         return _commodities;
     }
     std::vector<Commodity *> results;
+    // 搜索包含指定名称的商品
     for (const Commodity *commodity : _commodities)
     {
         if (commodity->getName().find(name) != std::string::npos)
@@ -198,154 +203,4 @@ std::vector<Commodity *> CommodityManager::getCommodityByMerchant(const std::str
         }
     }
     return results;
-}
-
-void CommodityManager::manageCommodity(const std::string &merchant)
-{
-    std::cout << "\n===== 商品信息管理菜单 =====\n";
-    std::vector<Commodity *> my_commodities = getCommodityByMerchant(merchant);
-    if (my_commodities.empty())
-    {
-        std::cout << "当前没有可管理的商品" << std::endl;
-        return;
-    }
-    std::cout << "选择要管理的商品:\n";
-    for (size_t i = 0; i < my_commodities.size(); ++i)
-    {
-        std::cout << i + 1 << ". " << my_commodities[i]->getName() << " (" << my_commodities[i]->getCommodityType() << ")" << std::endl;
-    }
-    std::cout << "输入商品编号（0 退出）: ";
-    size_t choice;
-
-    while (!(std::cin >> choice) || choice > my_commodities.size())
-    {
-        std::cin.clear();
-        std::cin.ignore(100, '\n');
-        std::cerr << "无效的输入" << std::endl;
-        std::cout << "输入商品编号（0 退出）: ";
-    }
-    if (choice == 0)
-        return;
-    Commodity *selected = my_commodities[choice - 1];
-    while (true)
-    {
-        std::cout << "\n当前商品: " << selected->getName() << "，类型：" << selected->getCommodityType() << std::endl;
-        std::cout << "0. 退出商品信息管理\n";
-        std::cout << "1. 修改原价\n";
-        std::cout << "2. 修改库存\n";
-        std::cout << "3. 修改折扣\n";
-        std::cout << "4. 查看商品详细信息\n";
-        std::cout << "选择要执行的操作: ";
-        while (!(std::cin >> choice) || choice > 5)
-        {
-            std::cin.clear();
-            std::cin.ignore(100, '\n');
-            std::cerr << "无效的输入" << std::endl;
-            std::cout << "选择要执行的操作: ";
-        }
-        switch (choice)
-        {
-        case 0:
-            return;
-        case 1:
-        {
-            std::cout << "当前原价：" << selected->getPrice() << std::endl;
-            double newPrice;
-            std::cout << "输入新原价: ";
-            if (!(std::cin >> newPrice))
-            {
-                std::cerr << "无效的输入" << std::endl;
-                continue;
-            }
-            if (selected->setBasePrice(newPrice))
-            {
-                std::cout << "原价修改成功，现在为: " << selected->getPrice() << std::endl;
-            }
-            break;
-        }
-        case 2:
-        {
-            std::cout << "当前库存：" << selected->getStorage() << std::endl;
-            int newStorage;
-            std::cout << "输入新库存: ";
-            if (!(std::cin >> newStorage))
-            {
-                std::cerr << "无效的输入" << std::endl;
-                continue;
-            }
-            if (selected->setStorage(newStorage))
-            {
-                std::cout << "库存修改成功，现在为: " << selected->getStorage() << std::endl;
-            }
-            break;
-        }
-        case 3:
-        {
-            int choice;
-            std::cout << "1. 单个商品打折\n"
-                      << "2. 相同类型商品批量打折\n";
-            std::cout << "选择要执行的操作: ";
-            while (!(std::cin >> choice) || choice < 1 || choice > 2)
-            {
-                std::cin.clear();
-                std::cin.ignore(100, '\n');
-                std::cerr << "无效的输入" << std::endl;
-                std::cout << "选择要执行的操作: ";
-            }
-            std::cin.ignore(100, '\n');
-            if (choice == 1)
-            {
-                std::cout << selected->getName() << "当前折扣：" << selected->getDiscount() << std::endl;
-                double newDiscount;
-                std::cout << "输入新折扣（0~1，1为原价）: ";
-                if (!(std::cin >> newDiscount))
-                {
-                    std::cerr << "无效的输入" << std::endl;
-                    continue;
-                }
-                if (selected->setDiscount(newDiscount))
-                {
-                    std::cout << "折扣修改成功，现在为: " << selected->getDiscount() << std::endl;
-                }
-                else
-                {
-                    std::cout << "折扣修改失败" << std::endl;
-                }
-            }
-            else
-            {
-                std::cout << "批量打折类型为 " << selected->getCommodityType() << std::endl;
-                double newDiscount;
-                std::cout << "输入新折扣（0~1，1为原价）: ";
-                if (!(std::cin >> newDiscount))
-                {
-                    std::cerr << "无效的输入" << std::endl;
-                    continue;
-                }
-                for (Commodity *&commodity : my_commodities)
-                {
-                    if (commodity->getCommodityType() == selected->getCommodityType())
-                    {
-                        std::cout << commodity->getName() << "的折扣修改中...，原来折扣为：" << commodity->getDiscount() << std::endl;
-                        if (commodity->setDiscount(newDiscount))
-                        {
-                            std::cout << "折扣修改成功，现在为: " << commodity->getDiscount() << std::endl;
-                        }
-                        else
-                        {
-                            std::cout << commodity->getName() << "折扣修改失败" << std::endl;
-                        }
-                    }
-                }
-            }
-            break;
-        }
-        case 4:
-            selected->print();
-            break;
-        default:
-            std::cout << "无效的选项" << std::endl;
-            break;
-        }
-    }
 }

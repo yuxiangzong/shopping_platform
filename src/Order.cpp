@@ -7,6 +7,7 @@
 Order::Order(const std::vector<std::pair<Commodity *, int>> &items)
     : _items(items), _status(PENDING)
 {
+    // 创建订单时冻结商品库存
     freezeCommodities(true);
 }
 

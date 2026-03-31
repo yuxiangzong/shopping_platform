@@ -10,6 +10,7 @@ add_executable(shopping_platform
     src/Commodity.cpp
     src/Order.cpp
     src/ShoppingCart.cpp
+    src/Network.cpp
 )
 
 target_include_directories(shopping_platform PRIVATE include)
