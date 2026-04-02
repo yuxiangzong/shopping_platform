@@ -2,10 +2,11 @@
 #include <fstream>
 #include "nlohmann/json.hpp"
 #include "User.h"
+#include "Order.h"
 
 // ==================== User ====================
 
-std::string User::encryptPassword(const std::string &password) const
+std::string User::encryptPassword(const std::string &password)
 {
     std::hash<std::string> hasher;
     return std::to_string(hasher(password));
@@ -54,6 +55,16 @@ bool User::subtractBalance(double amount)
     return true; // 消费成功，返回true
 }
 
+// ==================== Consumer ====================
+
+Consumer::~Consumer()
+{
+    for (Order *order : _orders)
+    {
+        delete order;
+    }
+}
+
 // ==================== UserManager ====================
 
 UserManager::UserManager() { loadUsers(); }
@@ -80,25 +91,19 @@ bool UserManager::loadUsers()
     infile >> j;
     for (const nlohmann::json &item : j)
     {
-        if (item["type"] != "Merchant" && item["type"] != "Consumer")
+        std::string type(item["type"]);
+        if (type != "Merchant" && type != "Consumer")
         {
-            std::cerr << "未知类型：" << item["type"] << std::endl;
+            std::cerr << "未知类型：" << type << std::endl;
             continue; // 忽略未知类型的用户
         }
-        std::string type(item["type"]);
         std::string username(item["username"]);
         std::string password(item["password"]);
         double balance = item["balance"];
 
-        User *user = nullptr;
-        if (type == "Merchant")
-        {
-            user = new Merchant(username, password, balance);
-        }
-        else if (type == "Consumer")
-        {
-            user = new Consumer(username, password, balance);
-        }
+        User *user = (type == "Merchant")
+                         ? static_cast<User *>(new Merchant(username, password, balance))
+                         : static_cast<User *>(new Consumer(username, password, balance));
         _users.push_back(user);
     }
     infile.close();
@@ -145,15 +150,9 @@ bool UserManager::registerUser(const std::string &type, const std::string &usern
         }
     }
 
-    User *newUser = nullptr;
-    if (type == "Merchant")
-    {
-        newUser = new Merchant(username, "");
-    }
-    else if (type == "Consumer")
-    {
-        newUser = new Consumer(username, "");
-    }
+    User *newUser = (type == "Merchant")
+                        ? static_cast<User *>(new Merchant(username, ""))
+                        : static_cast<User *>(new Consumer(username, ""));
     if (!newUser->setPassword(password))
     {
         delete newUser;

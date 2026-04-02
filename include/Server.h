@@ -1,11 +1,10 @@
-#ifndef NETWORK_H
-#define NETWORK_H
+#ifndef SERVER_H
+#define SERVER_H
 
 #include <functional>
 #include <unordered_map>
 #include "nlohmann/json.hpp"
 #include "User.h"
-#include "Order.h"
 #include "Commodity.h"
 
 using json = nlohmann::json;
@@ -24,8 +23,6 @@ private:
     std::unordered_map<std::string, std::function<json(const json &)>> _handlers; // 处理函数映射表
     UserManager _userManager;                                                     // 用户管理器
     CommodityManager _commodityManager;                                           // 商品管理器
-    ShoppingCart _shoppingCart;                                                   // 购物车
-    std::vector<Order *> _orders;                                                 // 订单列表
 
     // 处理登录请求
     json handleLogin(const json &request);
@@ -45,26 +42,9 @@ private:
     json handleMerchantOperation(const json &request);
     // 处理消费者操作请求
     json handleConsumerOperation(const json &request);
-};
 
-// 客户端类
-class Client
-{
-public:
-    // 构造函数
-    Client(const std::string &serverIp, int port);
-    // 向服务器发送请求并接收响应
-    json sendRequest(const json &request) const;
-    // 显示主菜单
-    void showMainMenu() const;
-    // 显示商家菜单
-    void showMerchantMenu(const std::string &username) const;
-    // 显示消费者菜单
-    void showConsumerMenu(const std::string &username) const;
-
-private:
-    std::string _serverIp; // 服务器IP地址
-    int _port;             // 服务器端口号
+    // 将商品信息序列化为JSON
+    static json commodityToJson(const Commodity *commodity);
 };
 
 #endif

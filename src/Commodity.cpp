@@ -114,7 +114,7 @@ bool CommodityManager::saveCommodities() const
             {"name", commodity->getName()},
             {"description", commodity->getDescription()},
             {"merchant", commodity->getMerchant()},
-            {"price", commodity->getPrice()},
+            {"price", commodity->getBasePrice()},
             {"storage", commodity->getStorage()},
             {"discount", commodity->getDiscount()}};
         j.push_back(info);
@@ -161,7 +161,7 @@ bool CommodityManager::addCommodity(const std::string &type, const std::string &
     return true;
 }
 
-void CommodityManager::showCommodities(std::vector<Commodity *> commodities) const
+void CommodityManager::showCommodities(const std::vector<Commodity *> &commodities) const
 {
     const std::string separator(50, '-');
     for (const Commodity *commodity : commodities)
@@ -173,33 +173,46 @@ void CommodityManager::showCommodities(std::vector<Commodity *> commodities) con
     std::cout << separator << std::endl;
 }
 
-std::vector<Commodity *> CommodityManager::findCommodity(const std::string &name) const
+std::vector<const Commodity *> CommodityManager::findCommodity(const std::string &name) const
 {
     // 如果搜索条件为空，则返回所有商品
     if (name.empty())
     {
-        return _commodities;
+        return std::vector<const Commodity *>(_commodities.begin(), _commodities.end());
     }
-    std::vector<Commodity *> results;
+    std::vector<const Commodity *> results;
     // 搜索包含指定名称的商品
     for (const Commodity *commodity : _commodities)
     {
         if (commodity->getName().find(name) != std::string::npos)
         {
-            results.push_back(const_cast<Commodity *>(commodity));
+            results.push_back(commodity);
         }
     }
     return results;
 }
 
-std::vector<Commodity *> CommodityManager::getCommodityByMerchant(const std::string &merchantName) const
+std::vector<const Commodity *> CommodityManager::getCommodityByMerchant(const std::string &merchantName) const
 {
-    std::vector<Commodity *> results;
+    std::vector<const Commodity *> results;
     for (const Commodity *commodity : _commodities)
     {
         if (commodity->getMerchant() == merchantName)
         {
-            results.push_back(const_cast<Commodity *>(commodity));
+            results.push_back(commodity);
+        }
+    }
+    return results;
+}
+
+std::vector<Commodity *> CommodityManager::getMutableCommodityByMerchant(const std::string &merchantName)
+{
+    std::vector<Commodity *> results;
+    for (Commodity *commodity : _commodities)
+    {
+        if (commodity->getMerchant() == merchantName)
+        {
+            results.push_back(commodity);
         }
     }
     return results;

@@ -1,11 +1,11 @@
 #ifndef ORDER_H
 #define ORDER_H
 
-#include <vector>
+#include <unordered_map>
 
 class User;
-class Commodity;
 class UserManager;
+class Commodity;
 
 // 订单类
 class Order
@@ -18,10 +18,11 @@ public:
         CANCELLED
     };
 
-    Order(const std::vector<std::pair<Commodity *, int>> &items);
+    Order(const std::unordered_map<Commodity *, int> &items);
+    ~Order();
 
     // 获取订单中的商品列表
-    const std::vector<std::pair<Commodity *, int>> &getItems() const { return _items; }
+    const std::unordered_map<Commodity *, int> &getItems() const { return _items; }
     // 获取订单总金额
     double getTotalAmount() const;
 
@@ -38,7 +39,7 @@ public:
     bool freezeCommodities(bool freeze);
 
 private:
-    std::vector<std::pair<Commodity *, int>> _items;
+    std::unordered_map<Commodity *, int> _items;
     Status _status;
 };
 

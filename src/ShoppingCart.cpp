@@ -1,5 +1,4 @@
 #include <iostream>
-#include <algorithm>
 #include "ShoppingCart.h"
 #include "Commodity.h"
 
@@ -11,9 +10,7 @@ bool ShoppingCart::addItem(Commodity *commodity, int quantity)
         return false;
     }
 
-    auto it = std::find_if(_items.begin(), _items.end(),
-                           [commodity](const auto &item)
-                           { return item.first == commodity; });
+    auto it = _items.find(commodity);
     int newQuantity = (it != _items.end()) ? it->second + quantity : quantity;
     if (newQuantity > commodity->getStorage())
     {
@@ -23,30 +20,17 @@ bool ShoppingCart::addItem(Commodity *commodity, int quantity)
         return false;
     }
 
-    if (it != _items.end())
-    {
-        it->second = newQuantity;
-    }
-    else
-    {
-        _items.emplace_back(commodity, quantity);
-    }
+    _items[commodity] = newQuantity;
     return true;
 }
 
 bool ShoppingCart::removeItem(Commodity *commodity)
 {
-    auto it = std::find_if(_items.begin(), _items.end(),
-                           [commodity](const auto &item)
-                           { return item.first == commodity; });
-
-    if (it == _items.end())
+    if (_items.erase(commodity) == 0)
     {
         std::cerr << "购物车中不存在该商品" << std::endl;
         return false;
     }
-
-    _items.erase(it);
     return true;
 }
 
@@ -65,10 +49,7 @@ bool ShoppingCart::updateQuantity(Commodity *commodity, int newQuantity)
         return false;
     }
 
-    auto it = std::find_if(_items.begin(), _items.end(),
-                           [commodity](const auto &item)
-                           { return item.first == commodity; });
-
+    auto it = _items.find(commodity);
     if (it == _items.end())
     {
         std::cerr << "购物车中不存在该商品" << std::endl;
@@ -79,7 +60,7 @@ bool ShoppingCart::updateQuantity(Commodity *commodity, int newQuantity)
     return true;
 }
 
-const std::vector<std::pair<Commodity *, int>> &ShoppingCart::getItems() const
+const std::unordered_map<Commodity *, int> &ShoppingCart::getItems() const
 {
     return _items;
 }

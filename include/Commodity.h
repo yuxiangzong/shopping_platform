@@ -80,17 +80,21 @@ class CommodityManager
 public:
     CommodityManager();
     ~CommodityManager();
+    CommodityManager(const CommodityManager &) = delete;
+    CommodityManager &operator=(const CommodityManager &) = delete;
 
     bool loadCommodities();                                                                                                                                                                             // 加载商品数据
     bool saveCommodities() const;                                                                                                                                                                       // 保存商品数据
     bool addCommodity(const std::string &type, const std::string &name, const std::string &merchant, const std::string &description = "", double price = 10.0, int storage = 0, double discount = 1.0); // 添加商品
 
     // 显示商品信息
-    void showCommodities(std::vector<Commodity *> commodities) const;
+    void showCommodities(const std::vector<Commodity *> &commodities) const;
     // 搜索商品
-    std::vector<Commodity *> findCommodity(const std::string &name = "") const;
+    std::vector<const Commodity *> findCommodity(const std::string &name = "") const;
     // 获取特定商家的所有商品
-    std::vector<Commodity *> getCommodityByMerchant(const std::string &merchantName) const;
+    std::vector<const Commodity *> getCommodityByMerchant(const std::string &merchantName) const;
+    // 获取特定商家的所有商品（可修改）
+    std::vector<Commodity *> getMutableCommodityByMerchant(const std::string &merchantName);
 
 private:
     std::vector<Commodity *> _commodities;        // 商品列表

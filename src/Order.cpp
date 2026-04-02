@@ -4,11 +4,20 @@
 #include "Commodity.h"
 #include "User.h"
 
-Order::Order(const std::vector<std::pair<Commodity *, int>> &items)
+Order::Order(const std::unordered_map<Commodity *, int> &items)
     : _items(items), _status(PENDING)
 {
     // 创建订单时冻结商品库存
     freezeCommodities(true);
+}
+
+Order::~Order()
+{
+    // 如果订单仍为待支付状态，解冻商品库存
+    if (_status == PENDING)
+    {
+        freezeCommodities(false);
+    }
 }
 
 double Order::getTotalAmount() const

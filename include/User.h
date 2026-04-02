@@ -5,8 +5,8 @@
 #include <vector>
 #include "ShoppingCart.h"
 
-#define MIN_PASSWORD_LENGTH 6  // 密码最小长度
-#define MAX_PASSWORD_LENGTH 16 // 密码最大长度
+static constexpr int MIN_PASSWORD_LENGTH = 6;  // 密码最小长度
+static constexpr int MAX_PASSWORD_LENGTH = 16; // 密码最大长度
 
 class Order;
 
@@ -26,8 +26,8 @@ public:
     std::string getPassword() const { return _password; }
     // 获取余额
     double getBalance() const { return _balance; }
-    // 加密密码（使用std::hash实现简单哈希加密）
-    std::string encryptPassword(const std::string &password) const;
+    // 加密密码（使用std::hash实现简单哈希加密），静态方法不依赖对象状态
+    static std::string encryptPassword(const std::string &password);
     // 检查密码是否正确
     bool checkPassword(const std::string &password) const { return encryptPassword(password) == _password; }
 
@@ -60,6 +60,7 @@ class Consumer : public User
 public:
     Consumer(const std::string &username, const std::string &password, double balance = 0.0)
         : User(username, password, balance) {}
+    virtual ~Consumer();
 
     std::string getUserType() const override { return "Consumer"; }
     ShoppingCart _shoppingCart;   // 购物车

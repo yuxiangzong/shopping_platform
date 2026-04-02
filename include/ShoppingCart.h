@@ -1,7 +1,7 @@
 #ifndef SHOPPINGCART_H
 #define SHOPPINGCART_H
 
-#include <vector>
+#include <unordered_map>
 
 class Commodity;
 
@@ -19,7 +19,7 @@ public:
     bool updateQuantity(Commodity *commodity, int newQuantity);
 
     // 获取购物车中所有商品
-    const std::vector<std::pair<Commodity *, int>> &getItems() const;
+    const std::unordered_map<Commodity *, int> &getItems() const;
 
     // 清空购物车
     void clear();
@@ -28,7 +28,7 @@ public:
     double calculateTotal() const;
 
 private:
-    std::vector<std::pair<Commodity *, int>> _items; // 存储商品及其数量
+    std::unordered_map<Commodity *, int> _items; // 存储商品及其数量
 };
 
 #endif
