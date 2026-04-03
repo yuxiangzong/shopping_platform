@@ -2,6 +2,7 @@
 #define COMMODITY_H
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 // 商品基类，抽象类
@@ -84,7 +85,11 @@ public:
     CommodityManager &operator=(const CommodityManager &) = delete;
 
     bool loadCommodities();                                                                                                                                                                             // 加载商品数据
-    bool saveCommodities() const;                                                                                                                                                                       // 保存商品数据
+    bool saveCommodities() const;
+    // 标记数据已被修改
+    void markDirty() { _dirty = true; }
+    // 检查数据是否被修改
+    bool isDirty() const { return _dirty; }                                                                                                                                                                       // 保存商品数据
     bool addCommodity(const std::string &type, const std::string &name, const std::string &merchant, const std::string &description = "", double price = 10.0, int storage = 0, double discount = 1.0); // 添加商品
 
     // 显示商品信息
@@ -95,10 +100,13 @@ public:
     std::vector<const Commodity *> getCommodityByMerchant(const std::string &merchantName) const;
     // 获取特定商家的所有商品（可修改）
     std::vector<Commodity *> getMutableCommodityByMerchant(const std::string &merchantName);
+    // 根据商品名获取商品（可修改），未找到返回nullptr
+    Commodity *getCommodityByName(const std::string &name);
 
 private:
-    std::vector<Commodity *> _commodities;        // 商品列表
-    std::string _filename = "./commodities.json"; // 商品数据存储文件名
+    std::unordered_map<std::string, Commodity *> _nameMap;  // 商品名到商品的映射
+    std::string _filename = "./commodities.json";            // 商品数据存储文件名
+    mutable bool _dirty = false;                             // 数据是否被修改，用于避免无变更时写磁盘
 };
 
 #endif

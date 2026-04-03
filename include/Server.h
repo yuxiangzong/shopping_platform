@@ -9,6 +9,51 @@
 
 using json = nlohmann::json;
 
+// 商家操作枚举
+enum class MerchantOp
+{
+    ViewBalance = 1,
+    Recharge = 2,
+    AddCommodity = 3,
+    ManageCommodities = 4,
+    ChangePassword = 5,
+    ListMyCommodities = 40,
+    ModifyPrice = 41,
+    ModifyStock = 42,
+    ModifyDiscount = 43,
+    BatchModifyDiscount = 44
+};
+
+// 消费者操作枚举
+enum class ConsumerOp
+{
+    ViewBalance = 1,
+    Recharge = 2,
+    ViewCommodities = 3,
+    SearchCommodities = 4,
+    ChangePassword = 5,
+    CartOperation = 6,
+    OrderOperation = 7
+};
+
+// 购物车操作枚举
+enum class CartOp
+{
+    ViewCart = 1,
+    AddItem = 2,
+    RemoveItem = 3,
+    UpdateQuantity = 4,
+    Checkout = 5
+};
+
+// 订单操作枚举
+enum class OrderOp
+{
+    ViewPending = 0,
+    Pay = 1,
+    Cancel = 2
+};
+
 // 服务器类
 class Server
 {
@@ -31,9 +76,9 @@ private:
     // 处理商品搜索请求
     json handleSearchCommodities(const json &request);
     // 处理用户余额操作请求
-    json handleBalanceOperation(User *user, int operation, const json &request) const;
+    json handleBalanceOperation(User *user, int operation, const json &request);
     // 处理密码修改请求
-    json handlePasswordChange(User *user, const json &request) const;
+    json handlePasswordChange(User *user, const json &request);
     // 处理购物车操作请求
     json handleCartOperation(const json &request);
     // 处理订单操作请求

@@ -21,6 +21,14 @@ public:
     // 显示消费者菜单
     void showConsumerMenu(const std::string &username) const;
 
+    // 显示辅助函数
+    static void printCommodities(const json &response);
+    static void printCartItems(const json &response);
+    static void printOrderItems(const json &order);
+
+    // 购物车子菜单
+    void showCartMenu(const std::string &username) const;
+
 private:
     std::string _serverIp; // 服务器IP地址
     int _port;             // 服务器端口号

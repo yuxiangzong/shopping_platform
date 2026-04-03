@@ -2,6 +2,7 @@
 #define USER_H
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include "ShoppingCart.h"
 
@@ -63,6 +64,12 @@ public:
     virtual ~Consumer();
 
     std::string getUserType() const override { return "Consumer"; }
+    ShoppingCart &getShoppingCart() { return _shoppingCart; }
+    const ShoppingCart &getShoppingCart() const { return _shoppingCart; }
+    std::vector<Order *> &getOrders() { return _orders; }
+    const std::vector<Order *> &getOrders() const { return _orders; }
+
+private:
     ShoppingCart _shoppingCart;   // 购物车
     std::vector<Order *> _orders; // 订单列表
 };
@@ -74,10 +81,14 @@ public:
     UserManager();
     ~UserManager();
 
-    // 加载用户信息，从文件中读取并解析JSON数据到_users中
+    // 加载用户信息，从文件中读取并解析JSON数据
     bool loadUsers();
-    // 保存用户信息，将_users中的数据序列化为JSON格式并写入文件
+    // 保存用户信息，仅在_dirty为true时写磁盘
     bool saveUsers() const;
+    // 标记数据已被修改
+    void markDirty() { _dirty = true; }
+    // 检查数据是否被修改
+    bool isDirty() const { return _dirty; }
     // 注册用户，type为"Merchant"或"Consumer"，username和password为用户名和密码
     bool registerUser(const std::string &type, const std::string &username, const std::string &password);
     // 登录用户，返回User对象指针
@@ -86,8 +97,9 @@ public:
     User *getUserByUsername(const std::string &username) const;
 
 private:
-    std::vector<User *> _users;             // 用户列表
-    std::string _filename = "./users.json"; // 用户数据存储文件名
+    std::unordered_map<std::string, User *> _userMap;   // 用户名到用户的映射
+    std::string _filename = "./users.json";              // 用户数据存储文件名
+    mutable bool _dirty = false;                         // 数据是否被修改，用于避免无变更时写磁盘
 };
 
 #endif

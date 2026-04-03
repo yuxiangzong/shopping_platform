@@ -6,7 +6,7 @@ int main(int argc, char *argv[])
 {
     if (argc != 3)
     {
-        std::cerr << "Usage: " << argv[0] << " <server_ip> <server_port>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <server_ip> <server_port>" << '\n';
         return 1;
     }
 
@@ -107,26 +107,7 @@ int main(int argc, char *argv[])
             {
                 json request = {{"action", "searchCommodities"}};
                 json response = client.sendRequest(request);
-
-                if (response["status"] == "success")
-                {
-                    std::cout << "\n商品列表:\n";
-                    for (const auto &item : response["commodities"])
-                    {
-                        std::cout << "名称: " << item["name"]
-                                  << ", 类型: " << item["type"]
-                                  << ", 描述: " << item["description"]
-                                  << ", 原价: " << item["basePrice"]
-                                  << ", 折扣: " << item["discount"]
-                                  << ", 价格: " << item["price"]
-                                  << ", 库存: " << item["storage"]
-                                  << ", 商家: " << item["merchant"] << "\n";
-                    }
-                }
-                else
-                {
-                    std::cout << "获取商品列表失败: " << response["message"] << "\n";
-                }
+                Client::printCommodities(response);
                 break;
             }
             case 4:
@@ -140,25 +121,7 @@ int main(int argc, char *argv[])
                     {"name", name}};
 
                 json response = client.sendRequest(request);
-                if (response["status"] == "success")
-                {
-                    std::cout << "\n搜索结果:\n";
-                    for (const auto &item : response["commodities"])
-                    {
-                        std::cout << "名称: " << item["name"]
-                                  << ", 类型: " << item["type"]
-                                  << ", 描述: " << item["description"]
-                                  << ", 原价: " << item["basePrice"]
-                                  << ", 折扣: " << item["discount"]
-                                  << ", 价格: " << item["price"]
-                                  << ", 库存: " << item["storage"]
-                                  << ", 商家: " << item["merchant"] << "\n";
-                    }
-                }
-                else
-                {
-                    std::cout << "搜索失败: " << response["message"] << "\n";
-                }
+                Client::printCommodities(response);
                 break;
             }
             default:

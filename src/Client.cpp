@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <cstring>
 #include <iostream>
+#include <limits>
 #include "Client.h"
 
 Client::Client(const std::string &serverIp, int port)
@@ -42,6 +43,58 @@ json Client::sendRequest(const json &request) const
     return json::parse(std::string(buffer, valread));
 }
 
+void Client::printCommodities(const json &response)
+{
+    if (response["status"] != "success")
+    {
+        std::cout << "操作失败: " << response["message"] << '\n';
+        return;
+    }
+    std::cout << "\n商品列表:\n";
+    for (const auto &item : response["commodities"])
+    {
+        std::cout << "名称: " << item["name"]
+                  << ", 类型: " << item["type"]
+                  << ", 价格: " << item["price"]
+                  << ", 库存: " << item["storage"]
+                  << ", 商家: " << item["merchant"] << "\n";
+    }
+}
+
+void Client::printCartItems(const json &response)
+{
+    if (response["status"] != "success")
+    {
+        std::cout << "获取购物车失败: " << response["message"] << '\n';
+        return;
+    }
+    if (response["items"].empty())
+    {
+        std::cout << "购物车为空" << '\n';
+        return;
+    }
+    std::cout << "购物车商品列表:" << '\n';
+    for (const auto &item : response["items"])
+    {
+        std::cout << item["name"] << " x" << item["quantity"]
+                  << " 单价:" << item["price"]
+                  << " 小计:" << item["price"].get<double>() * item["quantity"].get<int>() << '\n';
+    }
+    std::cout << "总计: " << response["total"] << '\n';
+}
+
+void Client::printOrderItems(const json &order)
+{
+    std::cout << "\n订单详情:\n";
+    for (const auto &item : order["items"])
+    {
+        std::cout << item["name"] << " x" << item["quantity"]
+                  << " 单价:" << item["price"]
+                  << " 小计:" << item["price"].get<double>() * item["quantity"].get<int>() << '\n';
+    }
+    std::cout << "总金额: " << order["total"] << "\n";
+}
+
 void Client::showMainMenu() const
 {
     std::cout << "\n***** 电商交易平台客户端 *****\n";
@@ -58,7 +111,7 @@ void Client::showMerchantMenu(const std::string &username) const
     while (true)
     {
         std::cout << "\n****** 商家菜单 ******\n";
-        std::cout << "欢迎，商家：" << username << std::endl;
+        std::cout << "欢迎，商家：" << username << '\n';
         std::cout << "1. 查看余额\n";
         std::cout << "2. 充值\n";
         std::cout << "3. 添加商品\n";
@@ -70,11 +123,11 @@ void Client::showMerchantMenu(const std::string &username) const
         int choice;
         while (!(std::cin >> choice) || choice < 0 || choice > 5)
         {
-            std::cerr << "无效的选项，请重新输入: " << std::endl;
+            std::cerr << "无效的选项，请重新输入: " << '\n';
             std::cin.clear();
-            std::cin.ignore(100, '\n');
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
         }
-        std::cin.ignore(100, '\n');
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
         json request = {
             {"action", "merchantOperation"},
@@ -90,11 +143,11 @@ void Client::showMerchantMenu(const std::string &username) const
             json response = sendRequest(request);
             if (response["status"] == "success")
             {
-                std::cout << "\n当前余额: " << response["balance"] << std::endl;
+                std::cout << "\n当前余额: " << response["balance"] << '\n';
             }
             else
             {
-                std::cout << "获取余额失败: " << response["message"] << std::endl;
+                std::cout << "获取余额失败: " << response["message"] << '\n';
             }
             break;
         }
@@ -106,21 +159,21 @@ void Client::showMerchantMenu(const std::string &username) const
             if (std::cin.fail())
             {
                 std::cin.clear();
-                std::cin.ignore(100, '\n');
-                std::cerr << "输入不合法" << std::endl;
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                std::cerr << "输入不合法" << '\n';
                 break;
             }
-            std::cin.ignore(100, '\n');
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             request["amount"] = amount;
 
             json response = sendRequest(request);
             if (response["status"] == "success")
             {
-                std::cout << "充值成功，当前余额: " << response["balance"] << std::endl;
+                std::cout << "充值成功，当前余额: " << response["balance"] << '\n';
             }
             else
             {
-                std::cout << "充值失败: " << response["message"] << std::endl;
+                std::cout << "充值失败: " << response["message"] << '\n';
             }
             break;
         }
@@ -132,11 +185,11 @@ void Client::showMerchantMenu(const std::string &username) const
             if (std::cin.fail() || typeID < 1 || typeID > 4)
             {
                 std::cin.clear();
-                std::cin.ignore(100, '\n');
-                std::cerr << "无效的商品类型" << std::endl;
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                std::cerr << "无效的商品类型" << '\n';
                 break;
             }
-            std::cin.ignore(100, '\n');
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
             std::string type, name, description;
             switch (typeID)
@@ -166,11 +219,11 @@ void Client::showMerchantMenu(const std::string &username) const
             if (std::cin.fail() || price <= 0)
             {
                 std::cin.clear();
-                std::cin.ignore(100, '\n');
-                std::cout << "输入不合法，价格必须是正数" << std::endl;
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                std::cout << "输入不合法，价格必须是正数" << '\n';
                 break;
             }
-            std::cin.ignore(100, '\n');
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
             int stock;
             std::cout << "请输入商品库存: ";
@@ -178,11 +231,11 @@ void Client::showMerchantMenu(const std::string &username) const
             if (std::cin.fail() || stock < 0)
             {
                 std::cin.clear();
-                std::cin.ignore(100, '\n');
-                std::cout << "输入不合法" << std::endl;
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                std::cout << "输入不合法" << '\n';
                 break;
             }
-            std::cin.ignore(100, '\n');
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
             request["type"] = type;
             request["commodityName"] = name;
@@ -193,11 +246,11 @@ void Client::showMerchantMenu(const std::string &username) const
             json response = sendRequest(request);
             if (response["status"] == "success")
             {
-                std::cout << "商品：" << name << "添加成功" << std::endl;
+                std::cout << "商品：" << name << "添加成功" << '\n';
             }
             else
             {
-                std::cout << "添加商品失败: " << response["message"] << std::endl;
+                std::cout << "添加商品失败: " << response["message"] << '\n';
             }
             break;
         }
@@ -213,61 +266,61 @@ void Client::showMerchantMenu(const std::string &username) const
                 json listResponse = sendRequest(listRequest);
                 if (listResponse["status"] != "success")
                 {
-                    std::cout << "获取商品列表失败: " << listResponse["message"] << std::endl;
+                    std::cout << "获取商品列表失败: " << listResponse["message"] << '\n';
                     break;
                 }
 
                 json commodities = listResponse["commodities"];
                 if (commodities.empty())
                 {
-                    std::cout << "您还没有商品，请先添加商品" << std::endl;
+                    std::cout << "您还没有商品，请先添加商品" << '\n';
                     break;
                 }
 
-                std::cout << "\n===== 商品管理 =====" << std::endl;
+                std::cout << "\n===== 商品管理 =====" << '\n';
                 for (size_t i = 0; i < commodities.size(); ++i)
                 {
                     std::cout << i + 1 << ". " << commodities[i]["name"]
                               << " (价格:" << commodities[i]["price"]
-                              << ", 库存:" << commodities[i]["storage"] << ")" << std::endl;
+                              << ", 库存:" << commodities[i]["storage"] << ")" << '\n';
                 }
-                std::cout << "0. 返回上级菜单" << std::endl;
+                std::cout << "0. 返回上级菜单" << '\n';
                 std::cout << "请选择要管理的商品: ";
 
                 size_t choice;
                 while (!(std::cin >> choice) || choice > commodities.size())
                 {
                     std::cin.clear();
-                    std::cin.ignore(100, '\n');
-                    std::cerr << "无效的输入" << std::endl;
+                    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                    std::cerr << "无效的输入" << '\n';
                     std::cout << "请选择要管理的商品: ";
                 }
-                std::cin.ignore(100, '\n');
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
                 if (choice == 0)
                     break;
 
                 json selected = commodities[choice - 1];
-                std::string commodityId = selected["id"];
+                std::string commodityName = selected["name"];
 
                 while (true)
                 {
-                    std::cout << "\n管理商品: " << selected["name"] << std::endl;
-                    std::cout << "1. 修改价格" << std::endl;
-                    std::cout << "2. 修改库存" << std::endl;
-                    std::cout << "3. 设置折扣" << std::endl;
-                    std::cout << "0. 返回商品列表" << std::endl;
+                    std::cout << "\n管理商品: " << selected["name"] << '\n';
+                    std::cout << "1. 修改价格" << '\n';
+                    std::cout << "2. 修改库存" << '\n';
+                    std::cout << "3. 设置折扣" << '\n';
+                    std::cout << "0. 返回商品列表" << '\n';
                     std::cout << "请选择操作: ";
 
                     int operation;
                     while (!(std::cin >> operation) || operation < 0 || operation > 3)
                     {
                         std::cin.clear();
-                        std::cin.ignore(100, '\n');
-                        std::cerr << "无效的输入" << std::endl;
+                        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                        std::cerr << "无效的输入" << '\n';
                         std::cout << "请选择操作: ";
                     }
-                    std::cin.ignore(100, '\n');
+                    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
                     if (operation == 0)
                         break;
@@ -276,41 +329,41 @@ void Client::showMerchantMenu(const std::string &username) const
                         {"action", "merchantOperation"},
                         {"username", username},
                         {"operation", 40 + operation}, // 41-43对应修改操作
-                        {"commodityId", commodityId}};
+                        {"commodityName", commodityName}};
 
                     switch (operation)
                     {
                     case 1:
                     {
                         double newPrice;
-                        std::cout << "当前价格: " << selected["price"] << std::endl;
+                        std::cout << "当前价格: " << selected["price"] << '\n';
                         std::cout << "输入新价格: ";
                         std::cin >> newPrice;
                         if (std::cin.fail())
                         {
                             std::cin.clear();
-                            std::cin.ignore(100, '\n');
-                            std::cerr << "无效的输入" << std::endl;
+                            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                            std::cerr << "无效的输入" << '\n';
                             continue;
                         }
-                        std::cin.ignore(100, '\n');
+                        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                         modifyRequest["newPrice"] = newPrice;
                         break;
                     }
                     case 2:
                     {
                         int newStock;
-                        std::cout << "当前库存: " << selected["storage"] << std::endl;
+                        std::cout << "当前库存: " << selected["storage"] << '\n';
                         std::cout << "输入新库存: ";
                         std::cin >> newStock;
                         if (std::cin.fail())
                         {
                             std::cin.clear();
-                            std::cin.ignore(100, '\n');
-                            std::cerr << "无效的输入" << std::endl;
+                            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                            std::cerr << "无效的输入" << '\n';
                             continue;
                         }
-                        std::cin.ignore(100, '\n');
+                        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                         modifyRequest["newStock"] = newStock;
                         break;
                     }
@@ -324,42 +377,42 @@ void Client::showMerchantMenu(const std::string &username) const
                         while (!(std::cin >> discountChoice) || discountChoice < 1 || discountChoice > 2)
                         {
                             std::cin.clear();
-                            std::cin.ignore(100, '\n');
-                            std::cerr << "无效的输入" << std::endl;
+                            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                            std::cerr << "无效的输入" << '\n';
                             std::cout << "请选择折扣方式: ";
                         }
-                        std::cin.ignore(100, '\n');
+                        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
                         if (discountChoice == 1)
                         {
                             double newDiscount;
-                            std::cout << "当前折扣: " << selected["discount"] << std::endl;
+                            std::cout << "当前折扣: " << selected["discount"] << '\n';
                             std::cout << "输入新折扣(0-1): ";
                             std::cin >> newDiscount;
                             if (std::cin.fail())
                             {
                                 std::cin.clear();
-                                std::cin.ignore(100, '\n');
-                                std::cerr << "无效的输入" << std::endl;
+                                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                                std::cerr << "无效的输入" << '\n';
                                 continue;
                             }
-                            std::cin.ignore(100, '\n');
+                            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                             modifyRequest["newDiscount"] = newDiscount;
                         }
                         else
                         {
                             double newDiscount;
-                            std::cout << "当前商品类型: " << selected["type"] << std::endl;
+                            std::cout << "当前商品类型: " << selected["type"] << '\n';
                             std::cout << "输入新折扣(0-1): ";
                             std::cin >> newDiscount;
                             if (std::cin.fail())
                             {
                                 std::cin.clear();
-                                std::cin.ignore(100, '\n');
-                                std::cerr << "无效的输入" << std::endl;
+                                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                                std::cerr << "无效的输入" << '\n';
                                 continue;
                             }
-                            std::cin.ignore(100, '\n');
+                            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                             modifyRequest["newDiscount"] = newDiscount;
                             modifyRequest["commodityType"] = selected["type"];
                             modifyRequest["operation"] = 44; // 批量折扣
@@ -371,13 +424,13 @@ void Client::showMerchantMenu(const std::string &username) const
                     json modifyResponse = sendRequest(modifyRequest);
                     if (modifyResponse["status"] == "success")
                     {
-                        std::cout << "修改成功" << std::endl;
+                        std::cout << "修改成功" << '\n';
                         // 更新本地显示的选中商品信息
                         selected = modifyResponse["commodity"];
                     }
                     else
                     {
-                        std::cout << "修改失败: " << modifyResponse["message"] << std::endl;
+                        std::cout << "修改失败: " << modifyResponse["message"] << '\n';
                     }
                 }
             }
@@ -393,16 +446,249 @@ void Client::showMerchantMenu(const std::string &username) const
             json response = sendRequest(request);
             if (response["status"] == "success")
             {
-                std::cout << "密码设置成功" << std::endl;
+                std::cout << "密码设置成功" << '\n';
             }
             else
             {
-                std::cout << "密码设置失败: " << response["message"] << std::endl;
+                std::cout << "密码设置失败: " << response["message"] << '\n';
             }
             break;
         }
         default:
-            std::cerr << "无效的选项" << std::endl;
+            std::cerr << "无效的选项" << '\n';
+            break;
+        }
+    }
+}
+
+void Client::showCartMenu(const std::string &username) const
+{
+    while (true)
+    {
+        std::cout << "\n****** 购物车 ******\n";
+        std::cout << "1. 查看购物车\n";
+        std::cout << "2. 添加商品到购物车\n";
+        std::cout << "3. 从购物车移除商品\n";
+        std::cout << "4. 修改商品数量\n";
+        std::cout << "5. 结算购物车\n";
+        std::cout << "0. 返回上一级\n";
+        std::cout << "请选择: ";
+
+        int cartChoice;
+        while (!(std::cin >> cartChoice) || cartChoice < 0 || cartChoice > 5)
+        {
+            std::cerr << "无效的选项，请重新输入: " << '\n';
+            std::cin.clear();
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        }
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+        json cartRequest = {
+            {"action", "cartOperation"},
+            {"username", username},
+            {"operation", cartChoice}};
+
+        switch (cartChoice)
+        {
+        case 0:
+            return;
+        case 1:
+        {
+            json response = sendRequest(cartRequest);
+            printCartItems(response);
+            break;
+        }
+        case 2:
+        {
+            std::string name;
+            std::cout << "请输入要添加的商品名称: ";
+            std::getline(std::cin >> std::ws, name);
+
+            json searchRequest = {
+                {"action", "searchCommodities"},
+                {"name", name}};
+            json searchResponse = sendRequest(searchRequest);
+
+            if (searchResponse["status"] != "success" || searchResponse["commodities"].empty())
+            {
+                std::cout << "未找到商品" << '\n';
+                break;
+            }
+
+            auto commodities = searchResponse["commodities"];
+            if (commodities.size() > 1)
+            {
+                std::cout << "找到多个商品，请选择:" << '\n';
+                for (size_t i = 0; i < commodities.size(); ++i)
+                {
+                    std::cout << i + 1 << ". " << commodities[i]["name"]
+                              << " 价格:" << commodities[i]["price"]
+                              << " 库存:" << commodities[i]["storage"]
+                              << " 商家:" << commodities[i]["merchant"] << '\n';
+                }
+                size_t selection;
+                std::cin >> selection;
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                if (selection < 1 || selection > commodities.size())
+                {
+                    std::cout << "无效选择" << '\n';
+                    break;
+                }
+                cartRequest["commodityName"] = commodities[selection - 1]["name"];
+            }
+            else
+            {
+                cartRequest["commodityName"] = commodities[0]["name"];
+            }
+
+            int quantity;
+            std::cout << "请输入购买数量: ";
+            std::cin >> quantity;
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            cartRequest["quantity"] = quantity;
+
+            json response = sendRequest(cartRequest);
+            if (response["status"] == "success")
+            {
+                std::cout << "添加成功" << '\n';
+            }
+            else
+            {
+                std::cout << "添加失败: " << response["message"] << '\n';
+            }
+            break;
+        }
+        case 3:
+        {
+            json listResponse = sendRequest({{"action", "cartOperation"},
+                                             {"username", username},
+                                             {"operation", 1}});
+
+            if (listResponse["status"] != "success" || listResponse["items"].empty())
+            {
+                std::cout << "购物车为空" << '\n';
+                break;
+            }
+
+            std::cout << "请选择要移除的商品:" << '\n';
+            for (size_t i = 0; i < listResponse["items"].size(); ++i)
+            {
+                std::cout << i + 1 << ". " << listResponse["items"][i]["name"]
+                          << " x" << listResponse["items"][i]["quantity"] << '\n';
+            }
+            size_t selection;
+            std::cin >> selection;
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            if (selection < 1 || selection > listResponse["items"].size())
+            {
+                std::cout << "无效选择" << '\n';
+                break;
+            }
+
+            cartRequest["commodityName"] = listResponse["items"][selection - 1]["name"];
+            json response = sendRequest(cartRequest);
+            if (response["status"] == "success")
+            {
+                std::cout << "移除成功" << '\n';
+            }
+            else
+            {
+                std::cout << "移除失败: " << response["message"] << '\n';
+            }
+            break;
+        }
+        case 4:
+        {
+            json listResponse = sendRequest({{"action", "cartOperation"},
+                                             {"username", username},
+                                             {"operation", 1}});
+
+            if (listResponse["status"] != "success" || listResponse["items"].empty())
+            {
+                std::cout << "购物车为空" << '\n';
+                break;
+            }
+
+            std::cout << "请选择要修改的商品:" << '\n';
+            for (size_t i = 0; i < listResponse["items"].size(); ++i)
+            {
+                std::cout << i + 1 << ". " << listResponse["items"][i]["name"]
+                          << " 当前数量: x" << listResponse["items"][i]["quantity"] << '\n';
+            }
+            size_t selection;
+            std::cin >> selection;
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            if (selection < 1 || selection > listResponse["items"].size())
+            {
+                std::cout << "无效选择" << '\n';
+                break;
+            }
+
+            int newQuantity;
+            std::cout << "请输入新的数量: ";
+            std::cin >> newQuantity;
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+            cartRequest["commodityName"] = listResponse["items"][selection - 1]["name"];
+            cartRequest["quantity"] = newQuantity;
+            json response = sendRequest(cartRequest);
+            if (response["status"] == "success")
+            {
+                std::cout << "修改成功" << '\n';
+            }
+            else
+            {
+                std::cout << "修改失败: " << response["message"] << '\n';
+            }
+            break;
+        }
+        case 5:
+        {
+            json listResponse = sendRequest({{"action", "cartOperation"},
+                                             {"username", username},
+                                             {"operation", 1}});
+
+            if (listResponse["status"] != "success" || listResponse["items"].empty())
+            {
+                std::cout << "购物车为空" << '\n';
+                break;
+            }
+
+            std::cout << "订单总金额: " << listResponse["total"] << '\n';
+            std::cout << "确认结算? (y/n): ";
+            char confirm;
+            std::cin >> confirm;
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            if (confirm == 'y' || confirm == 'Y')
+            {
+                cartRequest["immediatePayment"] = true;
+                json response = sendRequest(cartRequest);
+                if (response["status"] == "success")
+                {
+                    std::cout << "支付成功!" << '\n';
+                }
+                else
+                {
+                    std::cout << "支付失败: " << response["message"] << '\n';
+                }
+            }
+            else
+            {
+                cartRequest["immediatePayment"] = false;
+                json response = sendRequest(cartRequest);
+                if (response["status"] == "success")
+                {
+                    std::cout << "订单已生成，等待支付" << '\n';
+                }
+                else
+                {
+                    std::cout << "订单生成失败: " << response["message"] << '\n';
+                }
+            }
+            break;
+        }
+        default:
+            std::cerr << "无效的选项" << '\n';
             break;
         }
     }
@@ -413,7 +699,7 @@ void Client::showConsumerMenu(const std::string &username) const
     while (true)
     {
         std::cout << "\n****** 消费者菜单 ******\n";
-        std::cout << "欢迎，用户：" << username << std::endl;
+        std::cout << "欢迎，用户：" << username << '\n';
         std::cout << "1. 查看余额\n";
         std::cout << "2. 充值\n";
         std::cout << "3. 查看商品\n";
@@ -427,11 +713,11 @@ void Client::showConsumerMenu(const std::string &username) const
         int choice;
         while (!(std::cin >> choice) || choice < 0 || choice > 7)
         {
-            std::cerr << "无效的选项，请重新输入: " << std::endl;
+            std::cerr << "无效的选项，请重新输入: " << '\n';
             std::cin.clear();
-            std::cin.ignore(100, '\n');
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
         }
-        std::cin.ignore(100, '\n');
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
         json request = {
             {"action", "consumerOperation"},
@@ -447,11 +733,11 @@ void Client::showConsumerMenu(const std::string &username) const
             json response = sendRequest(request);
             if (response["status"] == "success")
             {
-                std::cout << "\n当前余额: " << response["balance"] << std::endl;
+                std::cout << "\n当前余额: " << response["balance"] << '\n';
             }
             else
             {
-                std::cout << "获取余额失败: " << response["message"] << std::endl;
+                std::cout << "获取余额失败: " << response["message"] << '\n';
             }
             break;
         }
@@ -463,43 +749,28 @@ void Client::showConsumerMenu(const std::string &username) const
             if (std::cin.fail())
             {
                 std::cin.clear();
-                std::cin.ignore(100, '\n');
-                std::cerr << "输入不合法" << std::endl;
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                std::cerr << "输入不合法" << '\n';
                 break;
             }
-            std::cin.ignore(100, '\n');
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             request["amount"] = amount;
 
             json response = sendRequest(request);
             if (response["status"] == "success")
             {
-                std::cout << "充值成功，当前余额: " << response["balance"] << std::endl;
+                std::cout << "充值成功，当前余额: " << response["balance"] << '\n';
             }
             else
             {
-                std::cout << "充值失败: " << response["message"] << std::endl;
+                std::cout << "充值失败: " << response["message"] << '\n';
             }
             break;
         }
         case 3:
         {
             json response = sendRequest(request);
-            if (response["status"] == "success")
-            {
-                std::cout << "\n商品列表:\n";
-                for (const auto &item : response["commodities"])
-                {
-                    std::cout << "名称: " << item["name"]
-                              << ", 类型: " << item["type"]
-                              << ", 价格: " << item["price"]
-                              << ", 库存: " << item["storage"]
-                              << ", 商家: " << item["merchant"] << "\n";
-                }
-            }
-            else
-            {
-                std::cout << "获取商品列表失败: " << response["message"] << std::endl;
-            }
+            printCommodities(response);
             break;
         }
         case 4:
@@ -510,22 +781,7 @@ void Client::showConsumerMenu(const std::string &username) const
             request["name"] = name;
 
             json response = sendRequest(request);
-            if (response["status"] == "success")
-            {
-                std::cout << "\n搜索结果:\n";
-                for (const auto &item : response["commodities"])
-                {
-                    std::cout << "名称: " << item["name"]
-                              << ", 类型: " << item["type"]
-                              << ", 价格: " << item["price"]
-                              << ", 库存: " << item["storage"]
-                              << ", 商家: " << item["merchant"] << "\n";
-                }
-            }
-            else
-            {
-                std::cout << "搜索失败: " << response["message"] << std::endl;
-            }
+            printCommodities(response);
             break;
         }
         case 5:
@@ -538,269 +794,17 @@ void Client::showConsumerMenu(const std::string &username) const
             json response = sendRequest(request);
             if (response["status"] == "success")
             {
-                std::cout << "密码设置成功" << std::endl;
+                std::cout << "密码设置成功" << '\n';
             }
             else
             {
-                std::cout << "密码设置失败: " << response["message"] << std::endl;
+                std::cout << "密码设置失败: " << response["message"] << '\n';
             }
             break;
         }
         case 6:
-        {
-            while (true)
-            {
-                std::cout << "\n****** 购物车 ******\n";
-                std::cout << "1. 查看购物车\n";
-                std::cout << "2. 添加商品到购物车\n";
-                std::cout << "3. 从购物车移除商品\n";
-                std::cout << "4. 修改商品数量\n";
-                std::cout << "5. 结算购物车\n";
-                std::cout << "0. 返回上一级\n";
-                std::cout << "请选择: ";
-
-                int cartChoice;
-                while (!(std::cin >> cartChoice) || cartChoice < 0 || cartChoice > 5)
-                {
-                    std::cerr << "无效的选项，请重新输入: " << std::endl;
-                    std::cin.clear();
-                    std::cin.ignore(100, '\n');
-                }
-                std::cin.ignore(100, '\n');
-
-                json cartRequest = {
-                    {"action", "cartOperation"},
-                    {"username", username},
-                    {"operation", cartChoice}};
-
-                switch (cartChoice)
-                {
-                case 0:
-                    goto end_shopping_cart;
-                case 1:
-                {
-                    json response = sendRequest(cartRequest);
-                    if (response["status"] == "success")
-                    {
-                        if (response["items"].empty())
-                        {
-                            std::cout << "购物车为空" << std::endl;
-                        }
-                        else
-                        {
-                            std::cout << "购物车商品列表:" << std::endl;
-                            for (const auto &item : response["items"])
-                            {
-                                std::cout << item["name"] << " x" << item["quantity"]
-                                          << " 单价:" << item["price"]
-                                          << " 小计:" << item["price"].get<double>() * item["quantity"].get<int>() << std::endl;
-                            }
-                            std::cout << "总计: " << response["total"] << std::endl;
-                        }
-                    }
-                    else
-                    {
-                        std::cout << "获取购物车失败: " << response["message"] << std::endl;
-                    }
-                    break;
-                }
-                case 2:
-                {
-                    std::string name;
-                    std::cout << "请输入要添加的商品名称: ";
-                    std::getline(std::cin >> std::ws, name);
-
-                    json searchRequest = {
-                        {"action", "searchCommodities"},
-                        {"name", name}};
-                    json searchResponse = sendRequest(searchRequest);
-
-                    if (searchResponse["status"] != "success" || searchResponse["commodities"].empty())
-                    {
-                        std::cout << "未找到商品" << std::endl;
-                        break;
-                    }
-
-                    auto commodities = searchResponse["commodities"];
-                    if (commodities.size() > 1)
-                    {
-                        std::cout << "找到多个商品，请选择:" << std::endl;
-                        for (size_t i = 0; i < commodities.size(); ++i)
-                        {
-                            std::cout << i + 1 << ". " << commodities[i]["name"]
-                                      << " 价格:" << commodities[i]["price"]
-                                      << " 库存:" << commodities[i]["storage"]
-                                      << " 商家:" << commodities[i]["merchant"] << std::endl;
-                        }
-                        size_t selection;
-                        std::cin >> selection;
-                        std::cin.ignore(100, '\n');
-                        if (selection < 1 || selection > commodities.size())
-                        {
-                            std::cout << "无效选择" << std::endl;
-                            break;
-                        }
-                        cartRequest["commodityId"] = commodities[selection - 1]["id"];
-                    }
-                    else
-                    {
-                        cartRequest["commodityId"] = commodities[0]["id"];
-                    }
-
-                    int quantity;
-                    std::cout << "请输入购买数量: ";
-                    std::cin >> quantity;
-                    std::cin.ignore(100, '\n');
-                    cartRequest["quantity"] = quantity;
-
-                    json response = sendRequest(cartRequest);
-                    if (response["status"] == "success")
-                    {
-                        std::cout << "添加成功" << std::endl;
-                    }
-                    else
-                    {
-                        std::cout << "添加失败: " << response["message"] << std::endl;
-                    }
-                    break;
-                }
-                case 3:
-                {
-                    json listResponse = sendRequest({{"action", "cartOperation"},
-                                                     {"username", username},
-                                                     {"operation", 1}});
-
-                    if (listResponse["status"] != "success" || listResponse["items"].empty())
-                    {
-                        std::cout << "购物车为空" << std::endl;
-                        break;
-                    }
-
-                    std::cout << "请选择要移除的商品:" << std::endl;
-                    for (size_t i = 0; i < listResponse["items"].size(); ++i)
-                    {
-                        std::cout << i + 1 << ". " << listResponse["items"][i]["name"]
-                                  << " x" << listResponse["items"][i]["quantity"] << std::endl;
-                    }
-                    size_t selection;
-                    std::cin >> selection;
-                    std::cin.ignore(100, '\n');
-                    if (selection < 1 || selection > listResponse["items"].size())
-                    {
-                        std::cout << "无效选择" << std::endl;
-                        break;
-                    }
-
-                    cartRequest["commodityId"] = listResponse["items"][selection - 1]["id"];
-                    json response = sendRequest(cartRequest);
-                    if (response["status"] == "success")
-                    {
-                        std::cout << "移除成功" << std::endl;
-                    }
-                    else
-                    {
-                        std::cout << "移除失败: " << response["message"] << std::endl;
-                    }
-                    break;
-                }
-                case 4:
-                {
-                    json listResponse = sendRequest({{"action", "cartOperation"},
-                                                     {"username", username},
-                                                     {"operation", 1}});
-
-                    if (listResponse["status"] != "success" || listResponse["items"].empty())
-                    {
-                        std::cout << "购物车为空" << std::endl;
-                        break;
-                    }
-
-                    std::cout << "请选择要修改的商品:" << std::endl;
-                    for (size_t i = 0; i < listResponse["items"].size(); ++i)
-                    {
-                        std::cout << i + 1 << ". " << listResponse["items"][i]["name"]
-                                  << " 当前数量: x" << listResponse["items"][i]["quantity"] << std::endl;
-                    }
-                    size_t selection;
-                    std::cin >> selection;
-                    std::cin.ignore(100, '\n');
-                    if (selection < 1 || selection > listResponse["items"].size())
-                    {
-                        std::cout << "无效选择" << std::endl;
-                        break;
-                    }
-
-                    int newQuantity;
-                    std::cout << "请输入新的数量: ";
-                    std::cin >> newQuantity;
-                    std::cin.ignore(100, '\n');
-
-                    cartRequest["commodityId"] = listResponse["items"][selection - 1]["id"];
-                    cartRequest["quantity"] = newQuantity;
-                    json response = sendRequest(cartRequest);
-                    if (response["status"] == "success")
-                    {
-                        std::cout << "修改成功" << std::endl;
-                    }
-                    else
-                    {
-                        std::cout << "修改失败: " << response["message"] << std::endl;
-                    }
-                    break;
-                }
-                case 5:
-                {
-                    json listResponse = sendRequest({{"action", "cartOperation"},
-                                                     {"username", username},
-                                                     {"operation", 1}});
-
-                    if (listResponse["status"] != "success" || listResponse["items"].empty())
-                    {
-                        std::cout << "购物车为空" << std::endl;
-                        break;
-                    }
-
-                    std::cout << "订单总金额: " << listResponse["total"] << std::endl;
-                    std::cout << "确认结算? (y/n): ";
-                    char confirm;
-                    std::cin >> confirm;
-                    std::cin.ignore(100, '\n');
-                    if (confirm == 'y' || confirm == 'Y')
-                    {
-                        cartRequest["immediatePayment"] = true;
-                        json response = sendRequest(cartRequest);
-                        if (response["status"] == "success")
-                        {
-                            std::cout << "支付成功!" << std::endl;
-                        }
-                        else
-                        {
-                            std::cout << "支付失败: " << response["message"] << std::endl;
-                        }
-                    }
-                    else
-                    {
-                        cartRequest["immediatePayment"] = false;
-                        json response = sendRequest(cartRequest);
-                        if (response["status"] == "success")
-                        {
-                            std::cout << "订单已生成，等待支付" << std::endl;
-                        }
-                        else
-                        {
-                            std::cout << "订单生成失败: " << response["message"] << std::endl;
-                        }
-                    }
-                    break;
-                }
-                default:
-                    std::cerr << "无效的选项" << std::endl;
-                    break;
-                }
-            }
-        end_shopping_cart:
+            showCartMenu(username);
             break;
-        }
         case 7:
         {
             json response = sendRequest({{"action", "orderOperation"},
@@ -808,7 +812,7 @@ void Client::showConsumerMenu(const std::string &username) const
                                          {"operation", 0}});
             if (response["status"] != "success")
             {
-                std::cerr << "获取订单失败: " << response["message"] << std::endl;
+                std::cerr << "获取订单失败: " << response["message"] << '\n';
                 continue;
             }
             std::cout << "\n****** 待支付订单 ******\n";
@@ -820,7 +824,7 @@ void Client::showConsumerMenu(const std::string &username) const
             std::cout << "请选择要操作的订单(0退出): ";
             size_t selection;
             std::cin >> selection;
-            std::cin.ignore(100, '\n');
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
             if (selection == 0)
             {
@@ -833,26 +837,19 @@ void Client::showConsumerMenu(const std::string &username) const
             }
 
             json order = response["orders"][selection - 1];
-            std::cout << "\n订单详情:\n";
-            for (const auto &item : order["items"])
-            {
-                std::cout << item["name"] << " x" << item["quantity"]
-                          << " 单价:" << item["price"]
-                          << " 小计:" << item["price"].get<double>() * item["quantity"].get<int>() << std::endl;
-            }
-            std::cout << "总金额: " << order["total"] << "\n";
+            printOrderItems(order);
             std::cout << "1. 支付订单\n";
             std::cout << "2. 取消订单\n";
             std::cout << "请选择操作: ";
 
             int action;
             std::cin >> action;
-            std::cin.ignore(100, '\n');
+            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
             json orderRequest = {
                 {"action", "orderOperation"},
                 {"username", username},
-                {"orderId", order["orderId"]},
+                {"orderIndex", order["orderIndex"]},
                 {"operation", action}};
 
             switch (action)
@@ -890,7 +887,7 @@ void Client::showConsumerMenu(const std::string &username) const
         }
         break;
         default:
-            std::cerr << "无效的选项" << std::endl;
+            std::cerr << "无效的选项" << '\n';
             break;
         }
     }

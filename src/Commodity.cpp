@@ -9,7 +9,7 @@ bool Commodity::setBasePrice(double price)
 {
     if (price < 0)
     {
-        std::cerr << "价格不能为负数" << std::endl;
+        std::cerr << "价格不能为负数" << '\n';
         return false;
     }
     _basePrice = price;
@@ -20,7 +20,7 @@ bool Commodity::setDiscount(double discount)
 {
     if (discount < 0 || discount > 1)
     {
-        std::cerr << "折扣必须在0到1之间" << std::endl;
+        std::cerr << "折扣必须在0到1之间" << '\n';
         return false;
     }
     _discount = discount;
@@ -31,7 +31,7 @@ bool Commodity::setStorage(int storage)
 {
     if (storage < 0)
     {
-        std::cerr << "库存不能为负数" << std::endl;
+        std::cerr << "库存不能为负数" << '\n';
         return false;
     }
     _storage = storage;
@@ -58,8 +58,8 @@ CommodityManager::CommodityManager() { loadCommodities(); }
 CommodityManager::~CommodityManager()
 {
     saveCommodities();
-    std::cout << "商品信息已保存" << std::endl;
-    for (Commodity *commodity : _commodities)
+    std::cout << "商品信息已保存" << '\n';
+    for (auto &[name, commodity] : _nameMap)
     {
         delete commodity;
     }
@@ -70,7 +70,7 @@ bool CommodityManager::loadCommodities()
     std::ifstream infile(_filename);
     if (!infile.is_open())
     {
-        std::cerr << "无法打开文件：" << _filename << std::endl;
+        std::cerr << "无法打开文件：" << _filename << '\n';
         return false;
     }
 
@@ -78,11 +78,6 @@ bool CommodityManager::loadCommodities()
     infile >> j;
     for (const nlohmann::json &item : j)
     {
-        if (item["type"] != "Food" && item["type"] != "Clothes" && item["type"] != "Book" && item["type"] != "Electronics")
-        {
-            std::cerr << "未知类型：" << item["type"] << std::endl;
-            continue;
-        }
         std::string type(item["type"]);
         std::string name(item["name"]);
         std::string merchant(item["merchant"]);
@@ -99,15 +94,17 @@ bool CommodityManager::loadCommodities()
 
 bool CommodityManager::saveCommodities() const
 {
+    if (!_dirty)
+        return true;
     std::ofstream outfile(_filename);
     if (!outfile.is_open())
     {
-        std::cerr << "无法打开文件：" << _filename << std::endl;
+        std::cerr << "无法打开文件：" << _filename << '\n';
         return false;
     }
 
     nlohmann::json j;
-    for (const Commodity *commodity : _commodities)
+    for (const auto &[name, commodity] : _nameMap)
     {
         nlohmann::json info = {
             {"type", commodity->getCommodityType()},
@@ -121,6 +118,7 @@ bool CommodityManager::saveCommodities() const
     }
     outfile << j.dump(4);
     outfile.close();
+    _dirty = false;
     return true;
 }
 
@@ -128,16 +126,13 @@ bool CommodityManager::addCommodity(const std::string &type, const std::string &
 {
     if (type != "Food" && type != "Clothes" && type != "Book" && type != "Electronics")
     {
-        std::cerr << "未知类型：" << type << std::endl;
+        std::cerr << "未知类型：" << type << '\n';
         return false;
     }
-    for (const Commodity *commodity : _commodities)
+    if (_nameMap.find(name) != _nameMap.end())
     {
-        if (commodity->getName() == name)
-        {
-            std::cerr << name << "已经存在" << std::endl;
-            return false;
-        }
+        std::cerr << name << "已经存在" << '\n';
+        return false;
     }
 
     Commodity *commodity = nullptr;
@@ -157,7 +152,8 @@ bool CommodityManager::addCommodity(const std::string &type, const std::string &
     {
         commodity = new Electronics(name, merchant, description, price, storage, discount);
     }
-    _commodities.push_back(commodity);
+    _nameMap[name] = commodity;
+    _dirty = true;
     return true;
 }
 
@@ -170,7 +166,7 @@ void CommodityManager::showCommodities(const std::vector<Commodity *> &commoditi
     }
     std::cout << separator << '\n';
     std::cout << "共有 " << commodities.size() << " 个商品\n";
-    std::cout << separator << std::endl;
+    std::cout << separator << '\n';
 }
 
 std::vector<const Commodity *> CommodityManager::findCommodity(const std::string &name) const
@@ -178,11 +174,14 @@ std::vector<const Commodity *> CommodityManager::findCommodity(const std::string
     // 如果搜索条件为空，则返回所有商品
     if (name.empty())
     {
-        return std::vector<const Commodity *>(_commodities.begin(), _commodities.end());
+        std::vector<const Commodity *> results;
+        for (const auto &[n, c] : _nameMap)
+            results.push_back(c);
+        return results;
     }
     std::vector<const Commodity *> results;
     // 搜索包含指定名称的商品
-    for (const Commodity *commodity : _commodities)
+    for (const auto &[n, commodity] : _nameMap)
     {
         if (commodity->getName().find(name) != std::string::npos)
         {
@@ -195,7 +194,7 @@ std::vector<const Commodity *> CommodityManager::findCommodity(const std::string
 std::vector<const Commodity *> CommodityManager::getCommodityByMerchant(const std::string &merchantName) const
 {
     std::vector<const Commodity *> results;
-    for (const Commodity *commodity : _commodities)
+    for (const auto &[n, commodity] : _nameMap)
     {
         if (commodity->getMerchant() == merchantName)
         {
@@ -205,10 +204,16 @@ std::vector<const Commodity *> CommodityManager::getCommodityByMerchant(const st
     return results;
 }
 
+Commodity *CommodityManager::getCommodityByName(const std::string &name)
+{
+    auto it = _nameMap.find(name);
+    return (it != _nameMap.end()) ? it->second : nullptr;
+}
+
 std::vector<Commodity *> CommodityManager::getMutableCommodityByMerchant(const std::string &merchantName)
 {
     std::vector<Commodity *> results;
-    for (Commodity *commodity : _commodities)
+    for (auto &[n, commodity] : _nameMap)
     {
         if (commodity->getMerchant() == merchantName)
         {

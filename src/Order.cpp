@@ -34,7 +34,7 @@ bool Order::pay(User *consumer, UserManager *userManager)
 {
     if (_status != PENDING)
     {
-        std::cerr << "订单状态错误，无法支付" << std::endl;
+        std::cerr << "订单状态错误，无法支付" << '\n';
         return false;
     }
 
@@ -50,7 +50,7 @@ bool Order::pay(User *consumer, UserManager *userManager)
     double total = getTotalAmount();
     if (!consumer->subtractBalance(total))
     {
-        std::cerr << "支付失败，当前余额为：" << consumer->getBalance() << std::endl;
+        std::cerr << "支付失败，当前余额为：" << consumer->getBalance() << '\n';
         return false;
     }
 
@@ -60,7 +60,7 @@ bool Order::pay(User *consumer, UserManager *userManager)
         User *merchant = userManager->getUserByUsername(merchantName);
         if (merchant && merchant->addBalance(amount))
         {
-            std::cout << "向商家" << merchantName << "转账成功，金额为：" << amount << std::endl;
+            std::cout << "向商家" << merchantName << "转账成功，金额为：" << amount << '\n';
         }
     }
 
@@ -72,7 +72,7 @@ bool Order::cancel()
 {
     if (_status != PENDING)
     {
-        std::cerr << "订单状态错误，无法取消" << std::endl;
+        std::cerr << "订单状态错误，无法取消" << '\n';
         return false;
     }
 
@@ -97,13 +97,13 @@ bool Order::freezeCommodities(bool freeze)
 
         if (newStorage < 0)
         {
-            std::cerr << "商品库存不足，无法冻结" << std::endl;
+            std::cerr << "商品库存不足，无法冻结" << '\n';
             return false;
         }
 
         if (!commodity->setStorage(newStorage))
         {
-            std::cerr << "商品库存设置失败" << std::endl;
+            std::cerr << "商品库存设置失败" << '\n';
             return false;
         }
     }

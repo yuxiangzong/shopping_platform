@@ -6,7 +6,7 @@ bool ShoppingCart::addItem(Commodity *commodity, int quantity)
 {
     if (quantity <= 0)
     {
-        std::cerr << "数量必须大于0" << std::endl;
+        std::cerr << "数量必须大于0" << '\n';
         return false;
     }
 
@@ -16,7 +16,7 @@ bool ShoppingCart::addItem(Commodity *commodity, int quantity)
     {
         std::cerr << "添加失败: 商品 " << commodity->getName()
                   << " 的库存不足 (库存: " << commodity->getStorage()
-                  << ", 请求数量: " << newQuantity << ")" << std::endl;
+                  << ", 请求数量: " << newQuantity << ")" << '\n';
         return false;
     }
 
@@ -28,7 +28,7 @@ bool ShoppingCart::removeItem(Commodity *commodity)
 {
     if (_items.erase(commodity) == 0)
     {
-        std::cerr << "购物车中不存在该商品" << std::endl;
+        std::cerr << "购物车中不存在该商品" << '\n';
         return false;
     }
     return true;
@@ -38,21 +38,21 @@ bool ShoppingCart::updateQuantity(Commodity *commodity, int newQuantity)
 {
     if (newQuantity <= 0)
     {
-        std::cerr << "数量必须大于0" << std::endl;
+        std::cerr << "数量必须大于0" << '\n';
         return false;
     }
     if (newQuantity > commodity->getStorage())
     {
         std::cerr << "更新失败: 商品 " << commodity->getName()
                   << " 的库存不足 (库存: " << commodity->getStorage()
-                  << ", 修改数量: " << newQuantity << ")" << std::endl;
+                  << ", 修改数量: " << newQuantity << ")" << '\n';
         return false;
     }
 
     auto it = _items.find(commodity);
     if (it == _items.end())
     {
-        std::cerr << "购物车中不存在该商品" << std::endl;
+        std::cerr << "购物车中不存在该商品" << '\n';
         return false;
     }
 
