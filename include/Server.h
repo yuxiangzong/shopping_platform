@@ -1,8 +1,14 @@
 #ifndef SERVER_H
 #define SERVER_H
 
-#include <functional>
+#include <vector>
+#include <queue>
 #include <unordered_map>
+#include <functional>
+#include <mutex>
+#include <thread>
+#include <atomic>
+#include <condition_variable>
 #include "nlohmann/json.hpp"
 #include "User.h"
 #include "Commodity.h"
@@ -60,6 +66,8 @@ class Server
 public:
     // 构造函数
     Server(int port);
+    // 析构函数
+    ~Server();
     // 启动服务器
     void start();
 
@@ -68,6 +76,17 @@ private:
     std::unordered_map<std::string, std::function<json(const json &)>> _handlers; // 处理函数映射表
     UserManager _userManager;                                                     // 用户管理器
     CommodityManager _commodityManager;                                           // 商品管理器
+
+    // 线程池
+    std::vector<std::thread> _workers;        // 工作线程
+    std::queue<std::function<void()>> _tasks; // 任务队列
+    std::mutex _queueMutex;                   // 任务队列互斥锁
+    std::condition_variable _cv;              // 条件变量
+    std::atomic<bool> _stop{false};           // 停止标志
+    std::mutex _dataMutex;                    // 数据互斥锁（保护 _userManager/_commodityManager）
+
+    // 处理单个连接
+    void handleConnection(int socket);
 
     // 处理登录请求
     json handleLogin(const json &request);

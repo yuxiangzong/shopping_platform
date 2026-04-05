@@ -36,14 +36,103 @@ Server::Server(int port) : _port(port)
     { return handleMerchantOperation(req); };
     _handlers["consumerOperation"] = [this](const json &req)
     { return handleConsumerOperation(req); };
+
+    // 创建线程池
+    unsigned int numThreads = std::thread::hardware_concurrency();
+    if (numThreads == 0)
+        numThreads = 4;
+    for (unsigned int i = 0; i < numThreads; ++i)
+    {
+        _workers.emplace_back([this]
+                              {
+            while (true) {
+                std::function<void()> task;
+                {
+                    std::unique_lock<std::mutex> lock(this->_queueMutex);
+                    _cv.wait(lock, [this] {
+                        return _stop || !_tasks.empty();
+                    });
+                    if (_stop && _tasks.empty()) {
+                        return;
+                    }
+                    task = std::move(_tasks.front());
+                    _tasks.pop();
+                }
+                task();
+            } });
+    }
+    std::cout << "Thread pool started with " << numThreads << " workers." << '\n';
+}
+
+Server::~Server()
+{
+    _stop = true;
+    _cv.notify_all();
+    for (auto &worker : _workers)
+    {
+        if (worker.joinable())
+            worker.join();
+    }
+}
+
+void Server::handleConnection(int clientSocket)
+{
+    char buffer[10240] = {0};
+
+    int valread = recv(clientSocket, buffer, 10240, 0);
+    if (valread <= 0)
+    {
+        close(clientSocket);
+        return;
+    }
+
+    try
+    {
+        json request = json::parse(std::string(buffer, valread));
+        std::string action = request["action"];
+
+        json response;
+        {
+            std::lock_guard<std::mutex> lock(_dataMutex);
+            if (_handlers.find(action) != _handlers.end())
+            {
+                response = _handlers[action](request);
+            }
+            else
+            {
+                response = {{"status", "error"}, {"message", "Unknown action"}};
+            }
+
+            // 仅在数据变更时保存
+            if (_userManager.isDirty() || _commodityManager.isDirty())
+            {
+                if (_userManager.saveUsers() && _commodityManager.saveCommodities())
+                {
+                    std::cout << "Users and commodities saved successfully." << '\n';
+                }
+                else
+                {
+                    std::cout << "Failed to save users or commodities." << '\n';
+                }
+            }
+        }
+
+        std::string responseStr = response.dump();
+        send(clientSocket, responseStr.c_str(), responseStr.size(), 0);
+    }
+    catch (const std::exception &e)
+    {
+        json errorResponse = {{"status", "error"}, {"message", e.what()}};
+        std::string errorResponseStr = errorResponse.dump();
+        send(clientSocket, errorResponseStr.c_str(), errorResponseStr.size(), 0);
+    }
+
+    close(clientSocket);
 }
 
 void Server::start()
 {
     int server_fd, new_socket;
-    struct sockaddr_in address;
-    socklen_t addrlen = sizeof(address);
-    char buffer[10240] = {0};
 
     // 创建socket文件描述符
     if ((server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_IP)) == 0)
@@ -51,6 +140,9 @@ void Server::start()
         perror("socket failed");
         exit(EXIT_FAILURE);
     }
+
+    struct sockaddr_in address;
+    socklen_t addrlen = sizeof(address);
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(_port);
@@ -80,58 +172,13 @@ void Server::start()
             continue;
         }
 
-        // 读取请求
-        int valread = recv(new_socket, buffer, 10240, 0);
-        if (valread <= 0)
+        // 将连接分发给线程池
         {
-            close(new_socket);
-            continue;
+            std::lock_guard<std::mutex> lock(_queueMutex);
+            _tasks.emplace([this, new_socket]()
+                           { handleConnection(new_socket); });
         }
-
-        try
-        {
-            // 解析请求
-            json request = json::parse(std::string(buffer, valread));
-
-            // 处理请求
-            std::string action = request["action"];
-            if (_handlers.find(action) != _handlers.end())
-            {
-                json response = _handlers[action](request);
-                std::string responseStr = response.dump();
-
-                // 发送响应
-                send(new_socket, responseStr.c_str(), responseStr.size(), 0);
-            }
-            else
-            {
-                json errorResponse = {{"status", "error"}, {"message", "Unknown action"}};
-                std::string errorResponseStr = errorResponse.dump();
-                send(new_socket, errorResponseStr.c_str(), errorResponseStr.size(), 0);
-            }
-        }
-        catch (const std::exception &e)
-        {
-            json errorResponse = {{"status", "error"}, {"message", e.what()}};
-            std::string errorResponseStr = errorResponse.dump();
-            send(new_socket, errorResponseStr.c_str(), errorResponseStr.size(), 0);
-        }
-
-        close(new_socket);
-        memset(buffer, 0, sizeof(buffer));
-
-        // 仅在数据变更时保存
-        if (_userManager.isDirty() || _commodityManager.isDirty())
-        {
-            if (_userManager.saveUsers() && _commodityManager.saveCommodities())
-            {
-                std::cout << "Users and commodities saved successfully." << '\n';
-            }
-            else
-            {
-                std::cout << "Failed to save users or commodities." << '\n';
-            }
-        }
+        _cv.notify_one();
     }
 }
 
@@ -615,8 +662,8 @@ json Server::handleOrderOperation(const json &request)
         {
             _userManager.markDirty();
             _commodityManager.markDirty();
-            delete order;
             orders.erase(orders.begin() + orderIndex);
+            delete order;
             return {{"status", "success"}};
         }
         else
