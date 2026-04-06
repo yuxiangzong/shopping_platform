@@ -63,16 +63,6 @@ bool User::subtractBalance(double amount)
     return true; // 消费成功，返回true
 }
 
-// ==================== Consumer ====================
-
-Consumer::~Consumer()
-{
-    for (Order *order : _orders)
-    {
-        delete order;
-    }
-}
-
 // ==================== UserManager ====================
 
 UserManager::UserManager() { loadUsers(); }
@@ -80,10 +70,7 @@ UserManager::~UserManager()
 {
     saveUsers();
     std::cout << "用户信息已保存" << '\n';
-    for (auto &[username, user] : _userMap)
-    {
-        delete user;
-    }
+    // unique_ptr 自动释放用户对象
 }
 
 bool UserManager::loadUsers()
@@ -109,10 +96,12 @@ bool UserManager::loadUsers()
         std::string password(item["password"]);
         double balance = item["balance"];
 
-        User *user = (type == "Merchant")
-                         ? static_cast<User *>(new Merchant(username, password, balance))
-                         : static_cast<User *>(new Consumer(username, password, balance));
-        _userMap[username] = user;
+        std::unique_ptr<User> user;
+        if (type == "Merchant")
+            user = std::make_unique<Merchant>(username, password, balance);
+        else
+            user = std::make_unique<Consumer>(username, password, balance);
+        _userMap[username] = std::move(user);
     }
     infile.close();
     return true; // 加载成功
@@ -158,15 +147,16 @@ bool UserManager::registerUser(const std::string &type, const std::string &usern
         return false; // 用户名已存在
     }
 
-    User *newUser = (type == "Merchant")
-                        ? static_cast<User *>(new Merchant(username, ""))
-                        : static_cast<User *>(new Consumer(username, ""));
+    std::unique_ptr<User> newUser;
+    if (type == "Merchant")
+        newUser = std::make_unique<Merchant>(username, "");
+    else
+        newUser = std::make_unique<Consumer>(username, "");
     if (!newUser->setPassword(password))
     {
-        delete newUser;
-        return false; // 密码设置失败，删除新用户对象
+        return false; // 密码设置失败，unique_ptr 自动释放
     }
-    _userMap[username] = newUser;
+    _userMap[username] = std::move(newUser);
     _dirty = true;
     return true; // 注册成功
 }
@@ -176,7 +166,7 @@ User *UserManager::login(const std::string &username, const std::string &passwor
     auto it = _userMap.find(username);
     if (it != _userMap.end() && it->second->checkPassword(password))
     {
-        return it->second; // 登录成功，返回用户对象
+        return it->second.get(); // 登录成功，返回非持有指针
     }
     std::cerr << "用户名或密码错误" << '\n';
     return nullptr; // 登录失败，返回空指针
@@ -187,7 +177,7 @@ User *UserManager::getUserByUsername(const std::string &username) const
     auto it = _userMap.find(username);
     if (it != _userMap.end())
     {
-        return it->second; // 返回非const指针，因为需要修改用户信息
+        return it->second.get(); // 返回非持有指针
     }
     std::cerr << "无法找到用户名：" << username << '\n';
     return nullptr; // 未找到用户

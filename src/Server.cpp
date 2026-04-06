@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 #include <iostream>
+#include <memory>
 #include "Server.h"
 #include "Order.h"
 
@@ -18,6 +19,33 @@ json Server::commodityToJson(const Commodity *commodity)
             {"price", commodity->getPrice()},
             {"discount", commodity->getDiscount()},
             {"storage", commodity->getStorage()}};
+}
+
+bool Server::isReadOnly(const std::string &action, const json &request) const
+{
+    if (action == "searchCommodities" || action == "login")
+        return true;
+    if (action == "register")
+        return false;
+
+    int operation = request.value("operation", -1);
+
+    if (action == "merchantOperation")
+        return operation == static_cast<int>(MerchantOp::ViewBalance) ||
+               operation == static_cast<int>(MerchantOp::ListMyCommodities);
+
+    if (action == "consumerOperation")
+        return operation == static_cast<int>(ConsumerOp::ViewBalance) ||
+               operation == static_cast<int>(ConsumerOp::ViewCommodities) ||
+               operation == static_cast<int>(ConsumerOp::SearchCommodities);
+
+    if (action == "cartOperation")
+        return operation == static_cast<int>(CartOp::ViewCart);
+
+    if (action == "orderOperation")
+        return operation == static_cast<int>(OrderOp::ViewPending);
+
+    return false; // 未知操作默认独占锁
 }
 
 Server::Server(int port) : _port(port)
@@ -92,16 +120,25 @@ void Server::handleConnection(int clientSocket)
         std::string action = request["action"];
 
         json response;
+        bool readOnly = isReadOnly(action, request);
+
+        if (readOnly)
         {
-            std::lock_guard<std::mutex> lock(_dataMutex);
-            if (_handlers.find(action) != _handlers.end())
-            {
-                response = _handlers[action](request);
-            }
-            else
-            {
-                response = {{"status", "error"}, {"message", "Unknown action"}};
-            }
+            // 读操作：共享锁，允许多个读者并发
+            std::shared_lock<std::shared_mutex> lock(_dataMutex);
+            auto it = _handlers.find(action);
+            response = (it != _handlers.end())
+                           ? it->second(request)
+                           : json({{"status", "error"}, {"message", "Unknown action"}});
+        }
+        else
+        {
+            // 写操作：独占锁，阻塞其他读者和写者
+            std::unique_lock<std::shared_mutex> lock(_dataMutex);
+            auto it = _handlers.find(action);
+            response = (it != _handlers.end())
+                           ? it->second(request)
+                           : json({{"status", "error"}, {"message", "Unknown action"}});
 
             // 仅在数据变更时保存
             if (_userManager.isDirty() || _commodityManager.isDirty())
@@ -564,7 +601,7 @@ json Server::handleCartOperation(const json &request)
         }
 
         // 创建订单
-        Order *order = new Order(items);
+        auto order = std::make_unique<Order>(items);
         double total = order->getTotalAmount();
 
         // 检查是否立即支付
@@ -576,7 +613,7 @@ json Server::handleCartOperation(const json &request)
             {
                 _userManager.markDirty();
                 _commodityManager.markDirty();
-                delete order;
+                // unique_ptr 自动释放订单
                 consumer->getShoppingCart().clear();
                 return {
                     {"status", "success"},
@@ -585,13 +622,12 @@ json Server::handleCartOperation(const json &request)
             }
             else
             {
-                delete order;
                 return {{"status", "error"}, {"message", "Payment failed"}};
             }
         }
         else
         {
-            consumer->getOrders().push_back(order);
+            consumer->getOrders().push_back(std::move(order));
             consumer->getShoppingCart().clear();
             size_t orderIndex = consumer->getOrders().size() - 1;
             return {{"status", "success"}, {"orderIndex", orderIndex}, {"total", total}, {"message", "Order saved for later payment"}};
@@ -656,14 +692,12 @@ json Server::handleOrderOperation(const json &request)
         {
             return {{"status", "error"}, {"message", "订单不存在"}};
         }
-        Order *order = orders[orderIndex];
 
-        if (order->pay(consumer, &_userManager))
+        if (orders[orderIndex]->pay(consumer, &_userManager))
         {
             _userManager.markDirty();
             _commodityManager.markDirty();
-            orders.erase(orders.begin() + orderIndex);
-            delete order;
+            orders.erase(orders.begin() + orderIndex); // unique_ptr 自动释放订单
             return {{"status", "success"}};
         }
         else
@@ -680,13 +714,11 @@ json Server::handleOrderOperation(const json &request)
         {
             return {{"status", "error"}, {"message", "订单不存在"}};
         }
-        Order *order = orders[orderIndex];
 
-        if (order->cancel())
+        if (orders[orderIndex]->cancel())
         {
             _commodityManager.markDirty();
-            delete order;
-            orders.erase(orders.begin() + orderIndex);
+            orders.erase(orders.begin() + orderIndex); // unique_ptr 自动释放订单
             return {{"status", "success"}};
         }
         else

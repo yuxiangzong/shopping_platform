@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <memory>
 
 // 商品基类，抽象类
 class Commodity
@@ -104,7 +105,7 @@ public:
     Commodity *getCommodityByName(const std::string &name);
 
 private:
-    std::unordered_map<std::string, Commodity *> _nameMap;  // 商品名到商品的映射
+    std::unordered_map<std::string, std::unique_ptr<Commodity>> _nameMap;  // 商品名到商品的映射
     std::string _filename = "./commodities.json";            // 商品数据存储文件名
     mutable bool _dirty = false;                             // 数据是否被修改，用于避免无变更时写磁盘
 };

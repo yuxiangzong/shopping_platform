@@ -4,6 +4,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <memory>
 #include "ShoppingCart.h"
 
 static constexpr int MIN_PASSWORD_LENGTH = 6;  // 密码最小长度
@@ -61,17 +62,16 @@ class Consumer : public User
 public:
     Consumer(const std::string &username, const std::string &password, double balance = 0.0)
         : User(username, password, balance) {}
-    virtual ~Consumer();
 
     std::string getUserType() const override { return "Consumer"; }
     ShoppingCart &getShoppingCart() { return _shoppingCart; }
     const ShoppingCart &getShoppingCart() const { return _shoppingCart; }
-    std::vector<Order *> &getOrders() { return _orders; }
-    const std::vector<Order *> &getOrders() const { return _orders; }
+    std::vector<std::unique_ptr<Order>> &getOrders() { return _orders; }
+    const std::vector<std::unique_ptr<Order>> &getOrders() const { return _orders; }
 
 private:
-    ShoppingCart _shoppingCart;   // 购物车
-    std::vector<Order *> _orders; // 订单列表
+    ShoppingCart _shoppingCart;                  // 购物车
+    std::vector<std::unique_ptr<Order>> _orders; // 订单列表
 };
 
 // 用户管理类，负责用户的注册、登录和保存等操作
@@ -97,9 +97,9 @@ public:
     User *getUserByUsername(const std::string &username) const;
 
 private:
-    std::unordered_map<std::string, User *> _userMap;   // 用户名到用户的映射
-    std::string _filename = "./users.json";              // 用户数据存储文件名
-    mutable bool _dirty = false;                         // 数据是否被修改，用于避免无变更时写磁盘
+    std::unordered_map<std::string, std::unique_ptr<User>> _userMap; // 用户名到用户的映射
+    std::string _filename = "./users.json";                          // 用户数据存储文件名
+    mutable bool _dirty = false;                                     // 数据是否被修改，用于避免无变更时写磁盘
 };
 
 #endif

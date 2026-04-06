@@ -59,10 +59,7 @@ CommodityManager::~CommodityManager()
 {
     saveCommodities();
     std::cout << "商品信息已保存" << '\n';
-    for (auto &[name, commodity] : _nameMap)
-    {
-        delete commodity;
-    }
+    // unique_ptr 自动释放商品对象
 }
 
 bool CommodityManager::loadCommodities()
@@ -135,24 +132,24 @@ bool CommodityManager::addCommodity(const std::string &type, const std::string &
         return false;
     }
 
-    Commodity *commodity = nullptr;
+    std::unique_ptr<Commodity> commodity;
     if (type == "Food")
     {
-        commodity = new Food(name, merchant, description, price, storage, discount);
+        commodity = std::make_unique<Food>(name, merchant, description, price, storage, discount);
     }
     else if (type == "Clothes")
     {
-        commodity = new Clothes(name, merchant, description, price, storage, discount);
+        commodity = std::make_unique<Clothes>(name, merchant, description, price, storage, discount);
     }
     else if (type == "Book")
     {
-        commodity = new Book(name, merchant, description, price, storage, discount);
+        commodity = std::make_unique<Book>(name, merchant, description, price, storage, discount);
     }
     else if (type == "Electronics")
     {
-        commodity = new Electronics(name, merchant, description, price, storage, discount);
+        commodity = std::make_unique<Electronics>(name, merchant, description, price, storage, discount);
     }
-    _nameMap[name] = commodity;
+    _nameMap[name] = std::move(commodity);
     _dirty = true;
     return true;
 }
@@ -176,7 +173,7 @@ std::vector<const Commodity *> CommodityManager::findCommodity(const std::string
     {
         std::vector<const Commodity *> results;
         for (const auto &[n, c] : _nameMap)
-            results.push_back(c);
+            results.push_back(c.get());
         return results;
     }
     std::vector<const Commodity *> results;
@@ -185,7 +182,7 @@ std::vector<const Commodity *> CommodityManager::findCommodity(const std::string
     {
         if (commodity->getName().find(name) != std::string::npos)
         {
-            results.push_back(commodity);
+            results.push_back(commodity.get());
         }
     }
     return results;
@@ -198,7 +195,7 @@ std::vector<const Commodity *> CommodityManager::getCommodityByMerchant(const st
     {
         if (commodity->getMerchant() == merchantName)
         {
-            results.push_back(commodity);
+            results.push_back(commodity.get());
         }
     }
     return results;
@@ -207,7 +204,7 @@ std::vector<const Commodity *> CommodityManager::getCommodityByMerchant(const st
 Commodity *CommodityManager::getCommodityByName(const std::string &name)
 {
     auto it = _nameMap.find(name);
-    return (it != _nameMap.end()) ? it->second : nullptr;
+    return (it != _nameMap.end()) ? it->second.get() : nullptr;
 }
 
 std::vector<Commodity *> CommodityManager::getMutableCommodityByMerchant(const std::string &merchantName)
@@ -217,7 +214,7 @@ std::vector<Commodity *> CommodityManager::getMutableCommodityByMerchant(const s
     {
         if (commodity->getMerchant() == merchantName)
         {
-            results.push_back(commodity);
+            results.push_back(commodity.get());
         }
     }
     return results;

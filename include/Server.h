@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <functional>
 #include <mutex>
+#include <shared_mutex>
 #include <thread>
 #include <atomic>
 #include <condition_variable>
@@ -83,7 +84,7 @@ private:
     std::mutex _queueMutex;                   // 任务队列互斥锁
     std::condition_variable _cv;              // 条件变量
     std::atomic<bool> _stop{false};           // 停止标志
-    std::mutex _dataMutex;                    // 数据互斥锁（保护 _userManager/_commodityManager）
+    std::shared_mutex _dataMutex;              // 读写锁（保护 _userManager/_commodityManager）
 
     // 处理单个连接
     void handleConnection(int socket);
@@ -109,6 +110,9 @@ private:
 
     // 将商品信息序列化为JSON
     static json commodityToJson(const Commodity *commodity);
+
+    // 判断请求是否为只读操作（用于选择共享锁或独占锁）
+    bool isReadOnly(const std::string &action, const json &request) const;
 };
 
 #endif
