@@ -10,56 +10,9 @@
 #include <thread>
 #include <atomic>
 #include <condition_variable>
-#include "nlohmann/json.hpp"
+#include "Protocol.h"
 #include "User.h"
 #include "Commodity.h"
-
-using json = nlohmann::json;
-
-// 商家操作枚举
-enum class MerchantOp
-{
-    ViewBalance = 1,
-    Recharge = 2,
-    AddCommodity = 3,
-    ManageCommodities = 4,
-    ChangePassword = 5,
-    ListMyCommodities = 40,
-    ModifyPrice = 41,
-    ModifyStock = 42,
-    ModifyDiscount = 43,
-    BatchModifyDiscount = 44
-};
-
-// 消费者操作枚举
-enum class ConsumerOp
-{
-    ViewBalance = 1,
-    Recharge = 2,
-    ViewCommodities = 3,
-    SearchCommodities = 4,
-    ChangePassword = 5,
-    CartOperation = 6,
-    OrderOperation = 7
-};
-
-// 购物车操作枚举
-enum class CartOp
-{
-    ViewCart = 1,
-    AddItem = 2,
-    RemoveItem = 3,
-    UpdateQuantity = 4,
-    Checkout = 5
-};
-
-// 订单操作枚举
-enum class OrderOp
-{
-    ViewPending = 0,
-    Pay = 1,
-    Cancel = 2
-};
 
 // 服务器类
 class Server

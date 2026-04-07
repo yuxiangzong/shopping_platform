@@ -1,8 +1,4 @@
-#include <arpa/inet.h>
 #include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#include <cstring>
 #include <iostream>
 #include <limits>
 #include "Client.h"
@@ -12,35 +8,34 @@ Client::Client(const std::string &serverIp, int port)
 
 json Client::sendRequest(const json &request) const
 {
-    int sock = 0;
-    struct sockaddr_in serv_addr;
-    char buffer[10240] = {0};
-
-    if ((sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP)) < 0)
-    {
+    int sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    if (sock < 0)
         throw std::runtime_error("Socket creation error");
-    }
 
+    struct sockaddr_in serv_addr;
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(_port);
 
     if (inet_pton(AF_INET, _serverIp.c_str(), &serv_addr.sin_addr) <= 0)
     {
+        close(sock);
         throw std::runtime_error("Invalid address/ Address not supported");
     }
 
-    if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
+    if (::connect(sock, reinterpret_cast<struct sockaddr *>(&serv_addr), sizeof(serv_addr)) < 0)
     {
+        close(sock);
         throw std::runtime_error("Connection Failed");
     }
 
-    std::string requestStr = request.dump();
-    send(sock, requestStr.c_str(), requestStr.size(), 0);
+    // 设置接收超时（10秒），防止服务端无响应时永久阻塞
+    struct timeval timeout{.tv_sec = 10, .tv_usec = 0};
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
-    int valread = read(sock, buffer, 10240);
+    sendJson(sock, request);
+    json response = recvJson(sock);
     close(sock);
-
-    return json::parse(std::string(buffer, valread));
+    return response;
 }
 
 void Client::printCommodities(const json &response)
@@ -261,7 +256,7 @@ void Client::showMerchantMenu(const std::string &username) const
                 json listRequest = {
                     {"action", "merchantOperation"},
                     {"username", username},
-                    {"operation", 40}}; // 40表示获取商家商品列表
+                    {"operation", static_cast<int>(MerchantOp::ListMyCommodities)}};
 
                 json listResponse = sendRequest(listRequest);
                 if (listResponse["status"] != "success")
@@ -328,7 +323,7 @@ void Client::showMerchantMenu(const std::string &username) const
                     json modifyRequest = {
                         {"action", "merchantOperation"},
                         {"username", username},
-                        {"operation", 40 + operation}, // 41-43对应修改操作
+                        {"operation", static_cast<int>(MerchantOp::ModifyPrice) + operation - 1},
                         {"commodityName", commodityName}};
 
                     switch (operation)
@@ -415,7 +410,7 @@ void Client::showMerchantMenu(const std::string &username) const
                             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                             modifyRequest["newDiscount"] = newDiscount;
                             modifyRequest["commodityType"] = selected["type"];
-                            modifyRequest["operation"] = 44; // 批量折扣
+                            modifyRequest["operation"] = static_cast<int>(MerchantOp::BatchModifyDiscount);
                         }
                         break;
                     }

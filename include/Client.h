@@ -2,31 +2,22 @@
 #define CLIENT_H
 
 #include <string>
-#include "nlohmann/json.hpp"
+#include "Protocol.h"
 
-using json = nlohmann::json;
-
-// 客户端类
 class Client
 {
 public:
-    // 构造函数
     Client(const std::string &serverIp, int port);
-    // 向服务器发送请求并接收响应
+
     json sendRequest(const json &request) const;
-    // 显示主菜单
     void showMainMenu() const;
-    // 显示商家菜单
     void showMerchantMenu(const std::string &username) const;
-    // 显示消费者菜单
     void showConsumerMenu(const std::string &username) const;
 
-    // 显示辅助函数
     static void printCommodities(const json &response);
     static void printCartItems(const json &response);
     static void printOrderItems(const json &order);
 
-    // 购物车子菜单
     void showCartMenu(const std::string &username) const;
 
 private:

@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 #include <algorithm>
+#include <csignal>
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -105,18 +106,9 @@ Server::~Server()
 
 void Server::handleConnection(int clientSocket)
 {
-    char buffer[10240] = {0};
-
-    int valread = recv(clientSocket, buffer, 10240, 0);
-    if (valread <= 0)
-    {
-        close(clientSocket);
-        return;
-    }
-
     try
     {
-        json request = json::parse(std::string(buffer, valread));
+        json request = recvJson(clientSocket);
         std::string action = request["action"];
 
         json response;
@@ -154,14 +146,18 @@ void Server::handleConnection(int clientSocket)
             }
         }
 
-        std::string responseStr = response.dump();
-        send(clientSocket, responseStr.c_str(), responseStr.size(), 0);
+        sendJson(clientSocket, response);
     }
     catch (const std::exception &e)
     {
-        json errorResponse = {{"status", "error"}, {"message", e.what()}};
-        std::string errorResponseStr = errorResponse.dump();
-        send(clientSocket, errorResponseStr.c_str(), errorResponseStr.size(), 0);
+        try
+        {
+            sendJson(clientSocket, {{"status", "error"}, {"message", e.what()}});
+        }
+        catch (...)
+        {
+            // 客户端已断开，无法发送错误响应
+        }
     }
 
     close(clientSocket);
@@ -192,7 +188,10 @@ void Server::start()
     }
 
     // 开始监听
-    if (listen(server_fd, 3) < 0)
+    // 忽略 SIGPIPE，防止客户端断开时 send 导致进程崩溃
+    signal(SIGPIPE, SIG_IGN);
+
+    if (listen(server_fd, SOMAXCONN) < 0)
     {
         perror("listen");
         exit(EXIT_FAILURE);
@@ -208,6 +207,10 @@ void Server::start()
             perror("accept");
             continue;
         }
+
+        // 设置接收超时（30秒），防止客户端连接后不发请求导致线程池耗尽
+        struct timeval timeout{.tv_sec = 30, .tv_usec = 0};
+        setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
         // 将连接分发给线程池
         {
