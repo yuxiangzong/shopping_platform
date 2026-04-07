@@ -1,14 +1,11 @@
 #include <iostream>
-#include <fstream>
-#include "nlohmann/json.hpp"
+#include <sqlite3.h>
 #include "User.h"
-#include "Order.h"
 
 // ==================== User ====================
 
 std::string User::encryptPassword(const std::string &password)
 {
-    // 加盐 + 多轮迭代哈希，确保跨平台一致性和安全性
     static const std::string salt = "ShoppingPlatform2025";
     static constexpr int ITERATIONS = 1000;
     std::hash<std::string> hasher;
@@ -25,15 +22,15 @@ bool User::setPassword(const std::string &password)
     if (password.empty())
     {
         std::cerr << "密码不能为空" << '\n';
-        return false; // 密码无效，返回false
+        return false;
     }
     if (password.size() < MIN_PASSWORD_LENGTH || password.size() > MAX_PASSWORD_LENGTH)
     {
         std::cerr << "密码长度必须在" << MIN_PASSWORD_LENGTH << '~' << MAX_PASSWORD_LENGTH << "之间" << '\n';
-        return false; // 密码长度不符合要求
+        return false;
     }
-    _password = encryptPassword(password); // 加密密码
-    return true;                           // 设置成功，返回true
+    _password = encryptPassword(password);
+    return true;
 }
 
 bool User::addBalance(double amount)
@@ -41,10 +38,10 @@ bool User::addBalance(double amount)
     if (amount <= 0)
     {
         std::cerr << "充值金额必须大于零" << '\n';
-        return false; // 充值金额无效，返回false
+        return false;
     }
     _balance += amount;
-    return true; // 充值成功，返回true
+    return true;
 }
 
 bool User::subtractBalance(double amount)
@@ -52,86 +49,61 @@ bool User::subtractBalance(double amount)
     if (amount <= 0)
     {
         std::cerr << "消费金额必须大于零" << '\n';
-        return false; // 消费金额无效，返回false
+        return false;
     }
     if (_balance < amount)
     {
         std::cerr << "余额不足" << '\n';
-        return false; // 余额不足，无法消费，返回false
+        return false;
     }
     _balance -= amount;
-    return true; // 消费成功，返回true
+    return true;
 }
 
 // ==================== UserManager ====================
 
-UserManager::UserManager() { loadUsers(); }
-UserManager::~UserManager()
-{
-    saveUsers();
-    std::cout << "用户信息已保存" << '\n';
-    // unique_ptr 自动释放用户对象
-}
+UserManager::UserManager(sqlite3 *db) : _db(db) {}
 
-bool UserManager::loadUsers()
+User *UserManager::getOrLoad(const std::string &username)
 {
-    std::ifstream infile(_filename);
-    if (!infile.is_open())
     {
-        std::cerr << "无法打开文件：" << _filename << '\n';
-        return false; // 文件打开失败，加载失败
+        std::lock_guard<std::mutex> lock(_cacheMutex);
+        auto it = _userMap.find(username);
+        if (it != _userMap.end())
+            return it->second.get();
     }
 
-    nlohmann::json j;
-    infile >> j;
-    for (const nlohmann::json &item : j)
-    {
-        std::string type(item["type"]);
-        if (type != "Merchant" && type != "Consumer")
-        {
-            std::cerr << "未知类型：" << type << '\n';
-            continue; // 忽略未知类型的用户
-        }
-        std::string username(item["username"]);
-        std::string password(item["password"]);
-        double balance = item["balance"];
+    // 缓存未命中，从 DB 加载
+    const char *sql = "SELECT id, password, type, balance FROM users WHERE username = ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return nullptr;
+    sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
 
-        std::unique_ptr<User> user;
+    std::unique_ptr<User> loaded;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+    {
+        int id = sqlite3_column_int(stmt, 0);
+        std::string pwd(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1)));
+        std::string type(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2)));
+        double balance = sqlite3_column_double(stmt, 3);
+
         if (type == "Merchant")
-            user = std::make_unique<Merchant>(username, password, balance);
+            loaded = std::make_unique<Merchant>(id, username, pwd, balance);
         else
-            user = std::make_unique<Consumer>(username, password, balance);
-        _userMap[username] = std::move(user);
+            loaded = std::make_unique<Consumer>(id, username, pwd, balance);
     }
-    infile.close();
-    return true; // 加载成功
-}
+    sqlite3_finalize(stmt);
 
-bool UserManager::saveUsers() const
-{
-    if (!_dirty)
-        return true;
-    std::ofstream outfile(_filename);
-    if (!outfile.is_open())
-    {
-        std::cerr << "无法打开文件：" << _filename << '\n';
-        return false;
-    }
+    if (!loaded) return nullptr;
 
-    nlohmann::json j;
-    for (const auto &[username, user] : _userMap)
-    {
-        nlohmann::json info = {
-            {"type", user->getUserType()},
-            {"username", user->getUsername()},
-            {"password", user->getPassword()},
-            {"balance", user->getBalance()}};
-        j.push_back(info);
-    }
-    outfile << j.dump(4); // 输出缩进为4个空格的JSON格式
-    outfile.close();
-    _dirty = false;
-    return true; // 保存成功
+    // 加入缓存（双重检查防止覆盖）
+    std::lock_guard<std::mutex> lock(_cacheMutex);
+    auto &slot = _userMap[username];
+    if (slot)
+        return slot.get(); // 另一个线程抢先加载了
+    slot = std::move(loaded);
+    return slot.get();
 }
 
 bool UserManager::registerUser(const std::string &type, const std::string &username, const std::string &password)
@@ -139,46 +111,118 @@ bool UserManager::registerUser(const std::string &type, const std::string &usern
     if (type != "Merchant" && type != "Consumer")
     {
         std::cerr << "未知类型：" << type << '\n';
-        return false; // 未知类型的用户
-    }
-    if (_userMap.find(username) != _userMap.end())
-    {
-        std::cerr << "用户名已存在" << '\n';
-        return false; // 用户名已存在
+        return false;
     }
 
-    std::unique_ptr<User> newUser;
-    if (type == "Merchant")
-        newUser = std::make_unique<Merchant>(username, "");
-    else
-        newUser = std::make_unique<Consumer>(username, "");
-    if (!newUser->setPassword(password))
+    // 先检查缓存
     {
-        return false; // 密码设置失败，unique_ptr 自动释放
+        std::lock_guard<std::mutex> lock(_cacheMutex);
+        if (_userMap.count(username))
+        {
+            std::cerr << "用户名已存在" << '\n';
+            return false;
+        }
     }
-    _userMap[username] = std::move(newUser);
-    _dirty = true;
-    return true; // 注册成功
+
+    if (password.empty() || password.size() < MIN_PASSWORD_LENGTH || password.size() > MAX_PASSWORD_LENGTH)
+    {
+        std::cerr << "密码长度必须在" << MIN_PASSWORD_LENGTH << '~' << MAX_PASSWORD_LENGTH << "之间" << '\n';
+        return false;
+    }
+    std::string encrypted = User::encryptPassword(password);
+
+    // 写入 DB（UNIQUE 约束保证最终一致性）
+    const char *sql = "INSERT INTO users (username, password, type, balance) VALUES (?, ?, ?, 0.0)";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+    {
+        std::cerr << "SQL prepare failed: " << sqlite3_errmsg(_db) << '\n';
+        return false;
+    }
+    sqlite3_bind_text(stmt, 1, username.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, encrypted.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, type.c_str(), -1, SQLITE_TRANSIENT);
+
+    if (sqlite3_step(stmt) != SQLITE_DONE)
+    {
+        std::cerr << "Register failed: " << sqlite3_errmsg(_db) << '\n';
+        sqlite3_finalize(stmt);
+        return false;
+    }
+    sqlite3_finalize(stmt);
+
+    int id = static_cast<int>(sqlite3_last_insert_rowid(_db));
+    std::unique_ptr<User> user;
+    if (type == "Merchant")
+        user = std::make_unique<Merchant>(id, username, encrypted);
+    else
+        user = std::make_unique<Consumer>(id, username, encrypted);
+
+    std::lock_guard<std::mutex> lock(_cacheMutex);
+    _userMap[username] = std::move(user);
+    return true;
 }
 
 User *UserManager::login(const std::string &username, const std::string &password)
 {
-    auto it = _userMap.find(username);
-    if (it != _userMap.end() && it->second->checkPassword(password))
-    {
-        return it->second.get(); // 登录成功，返回非持有指针
-    }
-    std::cerr << "用户名或密码错误" << '\n';
-    return nullptr; // 登录失败，返回空指针
+    User *user = getOrLoad(username);
+    if (user && user->checkPassword(password))
+        return user;
+    return nullptr;
 }
 
-User *UserManager::getUserByUsername(const std::string &username) const
+User *UserManager::getUserByUsername(const std::string &username)
 {
-    auto it = _userMap.find(username);
-    if (it != _userMap.end())
+    return getOrLoad(username);
+}
+
+User *UserManager::getUserById(int userId)
+{
+    // 先在缓存中按 id 查找
     {
-        return it->second.get(); // 返回非持有指针
+        std::lock_guard<std::mutex> lock(_cacheMutex);
+        for (const auto &[name, user] : _userMap)
+        {
+            if (user->getId() == userId)
+                return user.get();
+        }
     }
-    std::cerr << "无法找到用户名：" << username << '\n';
-    return nullptr; // 未找到用户
+
+    // 缓存未命中，从 DB 加载
+    const char *sql = "SELECT username FROM users WHERE id = ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return nullptr;
+    sqlite3_bind_int(stmt, 1, userId);
+    std::string username;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
+        username = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
+    sqlite3_finalize(stmt);
+
+    if (username.empty()) return nullptr;
+    return getOrLoad(username);
+}
+
+bool UserManager::updateBalance(User *user)
+{
+    const char *sql = "UPDATE users SET balance = ? WHERE id = ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_double(stmt, 1, user->getBalance());
+    sqlite3_bind_int(stmt, 2, user->getId());
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return ok;
+}
+
+bool UserManager::updatePassword(User *user)
+{
+    const char *sql = "UPDATE users SET password = ? WHERE id = ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_text(stmt, 1, user->getPassword().c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 2, user->getId());
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    return ok;
 }

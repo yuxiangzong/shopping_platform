@@ -1,221 +1,289 @@
 #include <iostream>
-#include <fstream>
-#include "nlohmann/json.hpp"
+#include <sqlite3.h>
 #include "Commodity.h"
 
-// ==================== Commodity ====================
+CommodityManager::CommodityManager(sqlite3 *db) : _db(db) {}
 
-bool Commodity::setBasePrice(double price)
+Commodity *CommodityManager::cacheCommodity(std::unique_ptr<Commodity> c)
 {
-    if (price < 0)
+    std::string name = c->getName();
+    int id = c->getId();
+    // 双重检查：可能已被其他线程缓存
+    auto &slot = _nameMap[name];
+    if (slot)
     {
-        std::cerr << "价格不能为负数" << '\n';
-        return false;
+        // 已存在，丢弃新加载的
+        return slot.get();
     }
-    _basePrice = price;
-    return true;
+    auto *ptr = c.get();
+    _idMap[id] = ptr;
+    slot = std::move(c);
+    return ptr;
 }
 
-bool Commodity::setDiscount(double discount)
+Commodity *CommodityManager::loadByName(const std::string &name)
 {
-    if (discount < 0 || discount > 1)
+    const char *sql = "SELECT id, type, merchant, description, base_price, storage, discount FROM commodities WHERE name = ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return nullptr;
+    sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+
+    std::unique_ptr<Commodity> result;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
     {
-        std::cerr << "折扣必须在0到1之间" << '\n';
-        return false;
+        result = std::make_unique<Commodity>(
+            sqlite3_column_int(stmt, 0),
+            name,
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1)),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2)),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 3)),
+            sqlite3_column_double(stmt, 4),
+            sqlite3_column_int(stmt, 5),
+            sqlite3_column_double(stmt, 6));
     }
-    _discount = discount;
-    return true;
+    sqlite3_finalize(stmt);
+
+    if (!result) return nullptr;
+
+    std::lock_guard<std::mutex> lock(_cacheMutex);
+    return cacheCommodity(std::move(result));
 }
 
-bool Commodity::setStorage(int storage)
+Commodity *CommodityManager::loadById(int id)
 {
-    if (storage < 0)
+    const char *sql = "SELECT name, type, merchant, description, base_price, storage, discount FROM commodities WHERE id = ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return nullptr;
+    sqlite3_bind_int(stmt, 1, id);
+
+    std::unique_ptr<Commodity> result;
+    if (sqlite3_step(stmt) == SQLITE_ROW)
     {
-        std::cerr << "库存不能为负数" << '\n';
-        return false;
+        std::string name(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0)));
+        result = std::make_unique<Commodity>(
+            id, name,
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1)),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2)),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 3)),
+            sqlite3_column_double(stmt, 4),
+            sqlite3_column_int(stmt, 5),
+            sqlite3_column_double(stmt, 6));
     }
-    _storage = storage;
-    return true;
+    sqlite3_finalize(stmt);
+
+    if (!result) return nullptr;
+
+    std::lock_guard<std::mutex> lock(_cacheMutex);
+    return cacheCommodity(std::move(result));
 }
 
-void Commodity::print() const
-{
-    const std::string separator(50, '-');
-    std::cout << separator << '\n';
-    std::cout << "商品类型: " << getCommodityType() << '\n';
-    std::cout << "名称: " << getName() << '\n';
-    std::cout << "描述: " << getDescription() << '\n';
-    std::cout << "商家: " << getMerchant() << '\n';
-    std::cout << "现价: " << getPrice() << '\n';
-    std::cout << "基础价格: " << getBasePrice() << '\n';
-    std::cout << "折扣: " << (getDiscount() * 100) << "%\n";
-    std::cout << "库存: " << getStorage() << "件\n";
-}
-
-// ==================== CommodityManager ====================
-
-CommodityManager::CommodityManager() { loadCommodities(); }
-CommodityManager::~CommodityManager()
-{
-    saveCommodities();
-    std::cout << "商品信息已保存" << '\n';
-    // unique_ptr 自动释放商品对象
-}
-
-bool CommodityManager::loadCommodities()
-{
-    std::ifstream infile(_filename);
-    if (!infile.is_open())
-    {
-        std::cerr << "无法打开文件：" << _filename << '\n';
-        return false;
-    }
-
-    nlohmann::json j;
-    infile >> j;
-    for (const nlohmann::json &item : j)
-    {
-        std::string type(item["type"]);
-        std::string name(item["name"]);
-        std::string merchant(item["merchant"]);
-        std::string description(item["description"]);
-        double price = item["price"];
-        int storage = item["storage"];
-        double discount = item["discount"];
-
-        addCommodity(type, name, merchant, description, price, storage, discount);
-    }
-    infile.close();
-    return true;
-}
-
-bool CommodityManager::saveCommodities() const
-{
-    if (!_dirty)
-        return true;
-    std::ofstream outfile(_filename);
-    if (!outfile.is_open())
-    {
-        std::cerr << "无法打开文件：" << _filename << '\n';
-        return false;
-    }
-
-    nlohmann::json j;
-    for (const auto &[name, commodity] : _nameMap)
-    {
-        nlohmann::json info = {
-            {"type", commodity->getCommodityType()},
-            {"name", commodity->getName()},
-            {"description", commodity->getDescription()},
-            {"merchant", commodity->getMerchant()},
-            {"price", commodity->getBasePrice()},
-            {"storage", commodity->getStorage()},
-            {"discount", commodity->getDiscount()}};
-        j.push_back(info);
-    }
-    outfile << j.dump(4);
-    outfile.close();
-    _dirty = false;
-    return true;
-}
-
-bool CommodityManager::addCommodity(const std::string &type, const std::string &name, const std::string &merchant, const std::string &description, double price, int storage, double discount)
+bool CommodityManager::addCommodity(const std::string &type, const std::string &name,
+                                     const std::string &merchant, const std::string &description,
+                                     double price, int storage, double discount)
 {
     if (type != "Food" && type != "Clothes" && type != "Book" && type != "Electronics")
     {
         std::cerr << "未知类型：" << type << '\n';
         return false;
     }
-    if (_nameMap.find(name) != _nameMap.end())
     {
-        std::cerr << name << "已经存在" << '\n';
+        std::lock_guard<std::mutex> lock(_cacheMutex);
+        if (_nameMap.count(name))
+        {
+            std::cerr << name << " 已经存在" << '\n';
+            return false;
+        }
+    }
+
+    const char *sql = "INSERT INTO commodities (name, type, merchant, description, base_price, storage, discount) VALUES (?, ?, ?, ?, ?, ?, ?)";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+    {
+        std::cerr << "SQL prepare failed: " << sqlite3_errmsg(_db) << '\n';
         return false;
     }
 
-    std::unique_ptr<Commodity> commodity;
-    if (type == "Food")
+    sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, type.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, merchant.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 4, description.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_double(stmt, 5, price);
+    sqlite3_bind_int(stmt, 6, storage);
+    sqlite3_bind_double(stmt, 7, discount);
+
+    if (sqlite3_step(stmt) != SQLITE_DONE)
     {
-        commodity = std::make_unique<Food>(name, merchant, description, price, storage, discount);
+        std::cerr << "Insert commodity failed: " << sqlite3_errmsg(_db) << '\n';
+        sqlite3_finalize(stmt);
+        return false;
     }
-    else if (type == "Clothes")
-    {
-        commodity = std::make_unique<Clothes>(name, merchant, description, price, storage, discount);
-    }
-    else if (type == "Book")
-    {
-        commodity = std::make_unique<Book>(name, merchant, description, price, storage, discount);
-    }
-    else if (type == "Electronics")
-    {
-        commodity = std::make_unique<Electronics>(name, merchant, description, price, storage, discount);
-    }
-    _nameMap[name] = std::move(commodity);
-    _dirty = true;
+    sqlite3_finalize(stmt);
+
+    int id = static_cast<int>(sqlite3_last_insert_rowid(_db));
+    auto c = std::make_unique<Commodity>(id, name, type, merchant, description, price, storage, discount);
+    std::lock_guard<std::mutex> lock(_cacheMutex);
+    _idMap[id] = c.get();
+    _nameMap[name] = std::move(c);
     return true;
 }
 
-void CommodityManager::showCommodities(const std::vector<Commodity *> &commodities) const
+std::vector<const Commodity *> CommodityManager::findCommodity(const std::string &name)
 {
-    const std::string separator(50, '-');
-    for (const Commodity *commodity : commodities)
-    {
-        commodity->print();
-    }
-    std::cout << separator << '\n';
-    std::cout << "共有 " << commodities.size() << " 个商品\n";
-    std::cout << separator << '\n';
-}
-
-std::vector<const Commodity *> CommodityManager::findCommodity(const std::string &name) const
-{
-    // 如果搜索条件为空，则返回所有商品
-    if (name.empty())
-    {
-        std::vector<const Commodity *> results;
-        for (const auto &[n, c] : _nameMap)
-            results.push_back(c.get());
-        return results;
-    }
     std::vector<const Commodity *> results;
-    // 搜索包含指定名称的商品
-    for (const auto &[n, commodity] : _nameMap)
+
+    std::string sql = name.empty()
+        ? "SELECT id, name, type, merchant, description, base_price, storage, discount FROM commodities"
+        : "SELECT id, name, type, merchant, description, base_price, storage, discount FROM commodities WHERE name LIKE '%' || ? || '%'";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
+        return results;
+
+    if (!name.empty())
+        sqlite3_bind_text(stmt, 1, name.c_str(), -1, SQLITE_TRANSIENT);
+
+    std::lock_guard<std::mutex> lock(_cacheMutex);
+    while (sqlite3_step(stmt) == SQLITE_ROW)
     {
-        if (commodity->getName().find(name) != std::string::npos)
-        {
-            results.push_back(commodity.get());
-        }
+        auto c = std::make_unique<Commodity>(
+            sqlite3_column_int(stmt, 0),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1)),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2)),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 3)),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 4)),
+            sqlite3_column_double(stmt, 5),
+            sqlite3_column_int(stmt, 6),
+            sqlite3_column_double(stmt, 7));
+
+        results.push_back(cacheCommodity(std::move(c)));
     }
+    sqlite3_finalize(stmt);
     return results;
 }
 
-std::vector<const Commodity *> CommodityManager::getCommodityByMerchant(const std::string &merchantName) const
+std::vector<const Commodity *> CommodityManager::getCommodityByMerchant(const std::string &merchantName)
 {
     std::vector<const Commodity *> results;
-    for (const auto &[n, commodity] : _nameMap)
+
+    const char *sql = "SELECT id, name, type, merchant, description, base_price, storage, discount FROM commodities WHERE merchant = ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK)
+        return results;
+
+    sqlite3_bind_text(stmt, 1, merchantName.c_str(), -1, SQLITE_TRANSIENT);
+
+    std::lock_guard<std::mutex> lock(_cacheMutex);
+    while (sqlite3_step(stmt) == SQLITE_ROW)
     {
-        if (commodity->getMerchant() == merchantName)
-        {
-            results.push_back(commodity.get());
-        }
+        auto c = std::make_unique<Commodity>(
+            sqlite3_column_int(stmt, 0),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1)),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2)),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 3)),
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 4)),
+            sqlite3_column_double(stmt, 5),
+            sqlite3_column_int(stmt, 6),
+            sqlite3_column_double(stmt, 7));
+
+        results.push_back(cacheCommodity(std::move(c)));
     }
+    sqlite3_finalize(stmt);
     return results;
 }
 
 Commodity *CommodityManager::getCommodityByName(const std::string &name)
 {
-    auto it = _nameMap.find(name);
-    return (it != _nameMap.end()) ? it->second.get() : nullptr;
+    {
+        std::lock_guard<std::mutex> lock(_cacheMutex);
+        auto it = _nameMap.find(name);
+        if (it != _nameMap.end())
+            return it->second.get();
+    }
+    return loadByName(name);
 }
 
-std::vector<Commodity *> CommodityManager::getMutableCommodityByMerchant(const std::string &merchantName)
+Commodity *CommodityManager::getCommodityById(int id)
 {
-    std::vector<Commodity *> results;
-    for (auto &[n, commodity] : _nameMap)
     {
-        if (commodity->getMerchant() == merchantName)
+        std::lock_guard<std::mutex> lock(_cacheMutex);
+        auto it = _idMap.find(id);
+        if (it != _idMap.end())
+            return it->second;
+    }
+    return loadById(id);
+}
+
+bool CommodityManager::updatePrice(Commodity *commodity, double newPrice)
+{
+    if (newPrice < 0) return false;
+
+    const char *sql = "UPDATE commodities SET base_price = ? WHERE id = ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_double(stmt, 1, newPrice);
+    sqlite3_bind_int(stmt, 2, commodity->getId());
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    if (ok) commodity->setBasePrice(newPrice);
+    return ok;
+}
+
+bool CommodityManager::updateStock(Commodity *commodity, int newStock)
+{
+    if (newStock < 0) return false;
+
+    const char *sql = "UPDATE commodities SET storage = ? WHERE id = ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_int(stmt, 1, newStock);
+    sqlite3_bind_int(stmt, 2, commodity->getId());
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    if (ok) commodity->setStorage(newStock);
+    return ok;
+}
+
+bool CommodityManager::updateDiscount(Commodity *commodity, double newDiscount)
+{
+    if (newDiscount < 0 || newDiscount > 1) return false;
+
+    const char *sql = "UPDATE commodities SET discount = ? WHERE id = ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+    sqlite3_bind_double(stmt, 1, newDiscount);
+    sqlite3_bind_int(stmt, 2, commodity->getId());
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+    if (ok) commodity->setDiscount(newDiscount);
+    return ok;
+}
+
+int CommodityManager::batchUpdateDiscount(const std::string &merchant, const std::string &type, double newDiscount)
+{
+    if (newDiscount < 0 || newDiscount > 1) return -1;
+
+    const char *sql = "UPDATE commodities SET discount = ? WHERE merchant = ? AND type = ?";
+    sqlite3_stmt *stmt;
+    if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return -1;
+    sqlite3_bind_double(stmt, 1, newDiscount);
+    sqlite3_bind_text(stmt, 2, merchant.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 3, type.c_str(), -1, SQLITE_TRANSIENT);
+    bool ok = (sqlite3_step(stmt) == SQLITE_DONE);
+    sqlite3_finalize(stmt);
+
+    if (!ok) return -1;
+
+    int count = sqlite3_changes(_db);
+
+    // 同步缓存
+    {
+        std::lock_guard<std::mutex> lock(_cacheMutex);
+        for (auto &[n, c] : _nameMap)
         {
-            results.push_back(commodity.get());
+            if (c->getMerchant() == merchant && c->getType() == type)
+                c->setDiscount(newDiscount);
         }
     }
-    return results;
+    return count;
 }

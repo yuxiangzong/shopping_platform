@@ -701,7 +701,7 @@ void Client::showConsumerMenu(const std::string &username) const
         std::cout << "4. 搜索商品\n";
         std::cout << "5. 修改密码\n";
         std::cout << "6. 购物车\n";
-        std::cout << "7. 待支付订单\n";
+        std::cout << "7. 订单\n";
         std::cout << "0. 退出登录\n";
         std::cout << "请选择: ";
 
@@ -810,13 +810,27 @@ void Client::showConsumerMenu(const std::string &username) const
                 std::cerr << "获取订单失败: " << response["message"] << '\n';
                 continue;
             }
-            std::cout << "\n****** 待支付订单 ******\n";
-            for (size_t i = 0; i < response["orders"].size(); ++i)
+            auto &orders = response["orders"];
+            if (orders.empty())
             {
-                std::cout << i + 1 << ". 订单总金额: " << response["orders"][i]["total"] << "\n";
+                std::cout << "暂无订单\n";
+                break;
             }
 
-            std::cout << "请选择要操作的订单(0退出): ";
+            std::cout << "\n****** 我的订单 ******\n";
+            for (size_t i = 0; i < orders.size(); ++i)
+            {
+                std::string status = orders[i]["status"];
+                std::string statusLabel = (status == "pending") ? "待支付"
+                                          : (status == "paid")  ? "已支付"
+                                                                : "已取消";
+                std::cout << i + 1 << ". [" << statusLabel << "] 订单总金额: " << orders[i]["total"];
+                if (orders[i].contains("createdAt"))
+                    std::cout << "  时间: " << orders[i]["createdAt"];
+                std::cout << "\n";
+            }
+
+            std::cout << "请选择要查看的订单(0退出): ";
             size_t selection;
             std::cin >> selection;
             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
@@ -825,62 +839,59 @@ void Client::showConsumerMenu(const std::string &username) const
             {
                 break;
             }
-            else if (selection < 1 || selection > response["orders"].size())
+            else if (selection < 1 || selection > orders.size())
             {
                 std::cerr << "无效选择\n";
                 continue;
             }
 
-            json order = response["orders"][selection - 1];
+            json order = orders[selection - 1];
             printOrderItems(order);
-            std::cout << "1. 支付订单\n";
-            std::cout << "2. 取消订单\n";
-            std::cout << "请选择操作: ";
 
-            int action;
-            std::cin >> action;
-            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-
-            json orderRequest = {
-                {"action", "orderOperation"},
-                {"username", username},
-                {"orderIndex", order["orderIndex"]},
-                {"operation", action}};
-
-            switch (action)
+            // 仅待支付订单可操作
+            if (order["status"] == "pending")
             {
-            case 1:
-            {
-                json payResponse = sendRequest(orderRequest);
-                if (payResponse["status"] == "success")
+                std::cout << "1. 支付订单\n";
+                std::cout << "2. 取消订单\n";
+                std::cout << "0. 返回\n";
+                std::cout << "请选择操作: ";
+
+                int action;
+                std::cin >> action;
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+
+                if (action == 0) break;
+
+                json orderRequest = {
+                    {"action", "orderOperation"},
+                    {"username", username},
+                    {"orderId", order["orderId"]},
+                    {"operation", action}};
+
+                if (action == 1)
                 {
-                    std::cout << "支付成功\n";
+                    json payResponse = sendRequest(orderRequest);
+                    if (payResponse["status"] == "success")
+                        std::cout << "支付成功\n";
+                    else
+                        std::cout << "支付失败: " << payResponse["message"] << "\n";
+                }
+                else if (action == 2)
+                {
+                    json cancelResponse = sendRequest(orderRequest);
+                    if (cancelResponse["status"] == "success")
+                        std::cout << "订单已取消\n";
+                    else
+                        std::cout << "取消失败: " << cancelResponse["message"] << "\n";
                 }
                 else
                 {
-                    std::cout << "支付失败: " << payResponse["message"] << "\n";
+                    std::cerr << "无效操作\n";
                 }
-                break;
             }
-            case 2:
-            {
-                json cancelResponse = sendRequest(orderRequest);
-                if (cancelResponse["status"] == "success")
-                {
-                    std::cout << "订单已取消\n";
-                }
-                else
-                {
-                    std::cout << "取消失败: " << cancelResponse["message"] << "\n";
-                }
-                break;
-            }
-            default:
-                std::cerr << "无效操作\n";
-                break;
-            }
+
+            break;
         }
-        break;
         default:
             std::cerr << "无效的选项" << '\n';
             break;

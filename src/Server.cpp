@@ -6,14 +6,12 @@
 #include <csignal>
 #include <cstring>
 #include <iostream>
-#include <memory>
 #include "Server.h"
-#include "Order.h"
 
 json Server::commodityToJson(const Commodity *commodity)
 {
     return {{"name", commodity->getName()},
-            {"type", commodity->getCommodityType()},
+            {"type", commodity->getType()},
             {"description", commodity->getDescription()},
             {"merchant", commodity->getMerchant()},
             {"basePrice", commodity->getBasePrice()},
@@ -46,10 +44,15 @@ bool Server::isReadOnly(const std::string &action, const json &request) const
     if (action == "orderOperation")
         return operation == static_cast<int>(OrderOp::ViewPending);
 
-    return false; // 未知操作默认独占锁
+    return false;
 }
 
-Server::Server(int port) : _port(port)
+Server::Server(int port)
+    : _port(port),
+      _db("./shopping.db"),
+      _userManager(_db.handle()),
+      _commodityManager(_db.handle()),
+      _orderManager(_db.handle(), _userManager, _commodityManager)
 {
     _handlers["login"] = [this](const json &req)
     { return handleLogin(req); };
@@ -116,7 +119,6 @@ void Server::handleConnection(int clientSocket)
 
         if (readOnly)
         {
-            // 读操作：共享锁，允许多个读者并发
             std::shared_lock<std::shared_mutex> lock(_dataMutex);
             auto it = _handlers.find(action);
             response = (it != _handlers.end())
@@ -125,25 +127,11 @@ void Server::handleConnection(int clientSocket)
         }
         else
         {
-            // 写操作：独占锁，阻塞其他读者和写者
             std::unique_lock<std::shared_mutex> lock(_dataMutex);
             auto it = _handlers.find(action);
             response = (it != _handlers.end())
                            ? it->second(request)
                            : json({{"status", "error"}, {"message", "Unknown action"}});
-
-            // 仅在数据变更时保存
-            if (_userManager.isDirty() || _commodityManager.isDirty())
-            {
-                if (_userManager.saveUsers() && _commodityManager.saveCommodities())
-                {
-                    std::cout << "Users and commodities saved successfully." << '\n';
-                }
-                else
-                {
-                    std::cout << "Failed to save users or commodities." << '\n';
-                }
-            }
         }
 
         sendJson(clientSocket, response);
@@ -156,7 +144,6 @@ void Server::handleConnection(int clientSocket)
         }
         catch (...)
         {
-            // 客户端已断开，无法发送错误响应
         }
     }
 
@@ -167,7 +154,6 @@ void Server::start()
 {
     int server_fd, new_socket;
 
-    // 创建socket文件描述符
     if ((server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_IP)) == 0)
     {
         perror("socket failed");
@@ -180,15 +166,12 @@ void Server::start()
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(_port);
 
-    // 绑定socket到端口
     if (bind(server_fd, (struct sockaddr *)&address, addrlen) < 0)
     {
         perror("bind failed");
         exit(EXIT_FAILURE);
     }
 
-    // 开始监听
-    // 忽略 SIGPIPE，防止客户端断开时 send 导致进程崩溃
     signal(SIGPIPE, SIG_IGN);
 
     if (listen(server_fd, SOMAXCONN) < 0)
@@ -201,18 +184,15 @@ void Server::start()
 
     while (true)
     {
-        // 接受新连接
         if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
         {
             perror("accept");
             continue;
         }
 
-        // 设置接收超时（30秒），防止客户端连接后不发请求导致线程池耗尽
         struct timeval timeout{.tv_sec = 30, .tv_usec = 0};
         setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
-        // 将连接分发给线程池
         {
             std::lock_guard<std::mutex> lock(_queueMutex);
             _tasks.emplace([this, new_socket]()
@@ -229,12 +209,9 @@ json Server::handleLogin(const json &request)
     std::string password = request["password"];
 
     User *user = _userManager.login(username, password);
-
     if (user)
     {
-        return {
-            {"status", "success"},
-            {"userType", user->getUserType()}};
+        return {{"status", "success"}, {"userType", user->getUserType()}};
     }
     else
     {
@@ -249,15 +226,13 @@ json Server::handleRegister(const json &request)
     std::string username = request["username"];
     std::string password = request["password"];
 
-    bool success = _userManager.registerUser(type, username, password);
-
-    if (success)
+    if (_userManager.registerUser(type, username, password))
     {
         return {{"status", "success"}};
     }
     else
     {
-        return {{"status", "error"}, {"message", "User already exists"}};
+        return {{"status", "error"}, {"message", "User already exists or invalid input"}};
     }
 }
 
@@ -266,20 +241,16 @@ json Server::handleBalanceOperation(User *user, int operation, const json &reque
     std::cout << "Handling balance operation..." << '\n';
     switch (operation)
     {
-    case static_cast<int>(MerchantOp::ViewBalance): // 查看余额
-        return {
-            {"status", "success"},
-            {"balance", user->getBalance()}};
+    case static_cast<int>(MerchantOp::ViewBalance):
+        return {{"status", "success"}, {"balance", user->getBalance()}};
 
-    case static_cast<int>(MerchantOp::Recharge): // 充值
+    case static_cast<int>(MerchantOp::Recharge):
     {
         double amount = request["amount"];
         if (user->addBalance(amount))
         {
-            _userManager.markDirty();
-            return {
-                {"status", "success"},
-                {"balance", user->getBalance()}};
+            _userManager.updateBalance(user);
+            return {{"status", "success"}, {"balance", user->getBalance()}};
         }
         else
         {
@@ -297,7 +268,7 @@ json Server::handlePasswordChange(User *user, const json &request)
     std::string newPassword = request["newPassword"];
     if (user->setPassword(newPassword))
     {
-        _userManager.markDirty();
+        _userManager.updatePassword(user);
         return {{"status", "success"}};
     }
     else
@@ -336,11 +307,11 @@ json Server::handleMerchantOperation(const json &request)
 
     switch (operation)
     {
-    case static_cast<int>(MerchantOp::ViewBalance): // 查看余额
-    case static_cast<int>(MerchantOp::Recharge):    // 充值
+    case static_cast<int>(MerchantOp::ViewBalance):
+    case static_cast<int>(MerchantOp::Recharge):
         return handleBalanceOperation(user, operation, request);
 
-    case static_cast<int>(MerchantOp::AddCommodity): // 添加商品
+    case static_cast<int>(MerchantOp::AddCommodity):
     {
         std::string type = request["type"];
         std::string name = request["commodityName"];
@@ -358,9 +329,9 @@ json Server::handleMerchantOperation(const json &request)
         }
     }
 
-    case static_cast<int>(MerchantOp::ListMyCommodities): // 获取商家商品列表
+    case static_cast<int>(MerchantOp::ListMyCommodities):
     {
-        auto commodities = _commodityManager.getMutableCommodityByMerchant(username);
+        auto commodities = _commodityManager.getCommodityByMerchant(username);
         json result = json::array();
         for (const auto &commodity : commodities)
         {
@@ -368,7 +339,8 @@ json Server::handleMerchantOperation(const json &request)
         }
         return {{"status", "success"}, {"commodities", result}};
     }
-    case static_cast<int>(MerchantOp::ModifyPrice): // 修改价格
+
+    case static_cast<int>(MerchantOp::ModifyPrice):
     {
         std::string commodityName = request["commodityName"];
         Commodity *commodity = _commodityManager.getCommodityByName(commodityName);
@@ -377,9 +349,8 @@ json Server::handleMerchantOperation(const json &request)
             return {{"status", "error"}, {"message", "商品不存在或无权修改"}};
         }
         double newPrice = request["newPrice"];
-        if (commodity->setBasePrice(newPrice))
+        if (_commodityManager.updatePrice(commodity, newPrice))
         {
-            _commodityManager.markDirty();
             return {{"status", "success"}, {"commodity", commodityToJson(commodity)}};
         }
         else
@@ -387,7 +358,8 @@ json Server::handleMerchantOperation(const json &request)
             return {{"status", "error"}, {"message", "价格修改失败"}};
         }
     }
-    case static_cast<int>(MerchantOp::ModifyStock): // 修改库存
+
+    case static_cast<int>(MerchantOp::ModifyStock):
     {
         std::string commodityName = request["commodityName"];
         Commodity *commodity = _commodityManager.getCommodityByName(commodityName);
@@ -396,9 +368,8 @@ json Server::handleMerchantOperation(const json &request)
             return {{"status", "error"}, {"message", "商品不存在或无权修改"}};
         }
         int newStock = request["newStock"];
-        if (commodity->setStorage(newStock))
+        if (_commodityManager.updateStock(commodity, newStock))
         {
-            _commodityManager.markDirty();
             return {{"status", "success"}, {"commodity", commodityToJson(commodity)}};
         }
         else
@@ -406,7 +377,8 @@ json Server::handleMerchantOperation(const json &request)
             return {{"status", "error"}, {"message", "库存修改失败"}};
         }
     }
-    case static_cast<int>(MerchantOp::ModifyDiscount): // 修改单个商品折扣
+
+    case static_cast<int>(MerchantOp::ModifyDiscount):
     {
         std::string commodityName = request["commodityName"];
         Commodity *commodity = _commodityManager.getCommodityByName(commodityName);
@@ -415,9 +387,8 @@ json Server::handleMerchantOperation(const json &request)
             return {{"status", "error"}, {"message", "商品不存在或无权修改"}};
         }
         double newDiscount = request["newDiscount"];
-        if (commodity->setDiscount(newDiscount))
+        if (_commodityManager.updateDiscount(commodity, newDiscount))
         {
-            _commodityManager.markDirty();
             return {{"status", "success"}, {"commodity", commodityToJson(commodity)}};
         }
         else
@@ -426,30 +397,14 @@ json Server::handleMerchantOperation(const json &request)
         }
     }
 
-    case static_cast<int>(MerchantOp::BatchModifyDiscount): // 批量修改同类型商品折扣
+    case static_cast<int>(MerchantOp::BatchModifyDiscount):
     {
         std::string commodityType = request["commodityType"];
         double newDiscount = request["newDiscount"];
-        auto commodities = _commodityManager.getMutableCommodityByMerchant(username);
-        int modifiedCount = 0;
-
-        for (auto &commodity : commodities)
+        int count = _commodityManager.batchUpdateDiscount(username, commodityType, newDiscount);
+        if (count > 0)
         {
-            if (commodity->getCommodityType() == commodityType)
-            {
-                if (commodity->setDiscount(newDiscount))
-                {
-                    modifiedCount++;
-                }
-            }
-        }
-
-        if (modifiedCount > 0)
-        {
-            _commodityManager.markDirty();
-            return {
-                {"status", "success"},
-                {"message", "成功修改" + std::to_string(modifiedCount) + "个商品的折扣"}};
+            return {{"status", "success"}, {"message", "成功修改" + std::to_string(count) + "个商品的折扣"}};
         }
         else
         {
@@ -457,7 +412,7 @@ json Server::handleMerchantOperation(const json &request)
         }
     }
 
-    case static_cast<int>(MerchantOp::ChangePassword): // 修改密码
+    case static_cast<int>(MerchantOp::ChangePassword):
         return handlePasswordChange(user, request);
 
     default:
@@ -479,26 +434,26 @@ json Server::handleConsumerOperation(const json &request)
 
     switch (operation)
     {
-    case static_cast<int>(ConsumerOp::ViewBalance): // 查看余额
-    case static_cast<int>(ConsumerOp::Recharge):    // 充值
+    case static_cast<int>(ConsumerOp::ViewBalance):
+    case static_cast<int>(ConsumerOp::Recharge):
         return handleBalanceOperation(user, operation, request);
 
-    case static_cast<int>(ConsumerOp::ViewCommodities): // 查看商品
+    case static_cast<int>(ConsumerOp::ViewCommodities):
         return handleSearchCommodities({{"action", "searchCommodities"}});
 
-    case static_cast<int>(ConsumerOp::SearchCommodities): // 搜索商品
+    case static_cast<int>(ConsumerOp::SearchCommodities):
     {
         std::string name = request.value("name", "");
         return handleSearchCommodities({{"action", "searchCommodities"}, {"name", name}});
     }
 
-    case static_cast<int>(ConsumerOp::ChangePassword): // 修改密码
+    case static_cast<int>(ConsumerOp::ChangePassword):
         return handlePasswordChange(user, request);
 
-    case static_cast<int>(ConsumerOp::CartOperation): // 购物车操作
+    case static_cast<int>(ConsumerOp::CartOperation):
         return handleCartOperation(request);
 
-    case static_cast<int>(ConsumerOp::OrderOperation): // 待支付订单
+    case static_cast<int>(ConsumerOp::OrderOperation):
         return handleOrderOperation(request);
 
     default:
@@ -518,35 +473,32 @@ json Server::handleCartOperation(const json &request)
         return {{"status", "error"}, {"message", "Invalid consumer user"}};
     }
 
-    Consumer *consumer = dynamic_cast<Consumer *>(user);
+    int userId = user->getId();
 
     switch (operation)
     {
-    case static_cast<int>(CartOp::ViewCart): // 查看购物车
+    case static_cast<int>(CartOp::ViewCart):
     {
-        auto items = consumer->getShoppingCart().getItems();
+        auto items = _orderManager.getCartItems(userId);
         json result = json::array();
+        double total = 0.0;
         for (const auto &item : items)
         {
-            result.push_back({{"name", item.first->getName()},
-                              {"quantity", item.second},
-                              {"price", item.first->getPrice()},
-                              {"subtotal", item.first->getPrice() * item.second}});
+            double subtotal = item.unitPrice * item.quantity;
+            result.push_back({{"name", item.commodityName},
+                              {"quantity", item.quantity},
+                              {"price", item.unitPrice},
+                              {"subtotal", subtotal}});
+            total += subtotal;
         }
-        return {{"status", "success"}, {"items", result}, {"total", consumer->getShoppingCart().calculateTotal()}};
+        return {{"status", "success"}, {"items", result}, {"total", total}};
     }
 
-    case static_cast<int>(CartOp::AddItem): // 添加商品到购物车
+    case static_cast<int>(CartOp::AddItem):
     {
         std::string commodityName = request["commodityName"];
-        Commodity *commodity = _commodityManager.getCommodityByName(commodityName);
-        if (!commodity)
-        {
-            return {{"status", "error"}, {"message", "商品不存在"}};
-        }
         int quantity = request["quantity"];
-
-        if (consumer->getShoppingCart().addItem(commodity, quantity))
+        if (_orderManager.addToCart(userId, commodityName, quantity))
         {
             return {{"status", "success"}};
         }
@@ -556,16 +508,10 @@ json Server::handleCartOperation(const json &request)
         }
     }
 
-    case static_cast<int>(CartOp::RemoveItem): // 从购物车移除商品
+    case static_cast<int>(CartOp::RemoveItem):
     {
         std::string commodityName = request["commodityName"];
-        Commodity *commodity = _commodityManager.getCommodityByName(commodityName);
-        if (!commodity)
-        {
-            return {{"status", "error"}, {"message", "商品不存在"}};
-        }
-
-        if (consumer->getShoppingCart().removeItem(commodity))
+        if (_orderManager.removeFromCart(userId, commodityName))
         {
             return {{"status", "success"}};
         }
@@ -575,17 +521,11 @@ json Server::handleCartOperation(const json &request)
         }
     }
 
-    case static_cast<int>(CartOp::UpdateQuantity): // 修改商品数量
+    case static_cast<int>(CartOp::UpdateQuantity):
     {
         std::string commodityName = request["commodityName"];
-        Commodity *commodity = _commodityManager.getCommodityByName(commodityName);
-        if (!commodity)
-        {
-            return {{"status", "error"}, {"message", "商品不存在"}};
-        }
         int newQuantity = request["quantity"];
-
-        if (consumer->getShoppingCart().updateQuantity(commodity, newQuantity))
+        if (_orderManager.updateCartQuantity(userId, commodityName, newQuantity))
         {
             return {{"status", "success"}};
         }
@@ -595,45 +535,23 @@ json Server::handleCartOperation(const json &request)
         }
     }
 
-    case static_cast<int>(CartOp::Checkout): // 结算购物车
+    case static_cast<int>(CartOp::Checkout):
     {
-        auto items = consumer->getShoppingCart().getItems();
-        if (items.empty())
-        {
-            return {{"status", "error"}, {"message", "Cart is empty"}};
-        }
-
-        // 创建订单
-        auto order = std::make_unique<Order>(items);
-        double total = order->getTotalAmount();
-
-        // 检查是否立即支付
         bool immediatePayment = request.value("immediatePayment", false);
+        std::string errorMsg;
+        int orderId = _orderManager.checkout(userId, immediatePayment, errorMsg);
+        if (orderId < 0)
+        {
+            return {{"status", "error"}, {"message", errorMsg}};
+        }
 
         if (immediatePayment)
         {
-            if (order->pay(consumer, &_userManager))
-            {
-                _userManager.markDirty();
-                _commodityManager.markDirty();
-                // unique_ptr 自动释放订单
-                consumer->getShoppingCart().clear();
-                return {
-                    {"status", "success"},
-                    {"message", "Payment successful"},
-                    {"total", total}};
-            }
-            else
-            {
-                return {{"status", "error"}, {"message", "Payment failed"}};
-            }
+            return {{"status", "success"}, {"message", "Payment successful"}, {"orderId", orderId}};
         }
         else
         {
-            consumer->getOrders().push_back(std::move(order));
-            consumer->getShoppingCart().clear();
-            size_t orderIndex = consumer->getOrders().size() - 1;
-            return {{"status", "success"}, {"orderIndex", orderIndex}, {"total", total}, {"message", "Order saved for later payment"}};
+            return {{"status", "success"}, {"orderId", orderId}, {"message", "Order saved for later payment"}};
         }
     }
 
@@ -654,79 +572,62 @@ json Server::handleOrderOperation(const json &request)
         return {{"status", "error"}, {"message", "Invalid consumer user"}};
     }
 
-    Consumer *consumer = dynamic_cast<Consumer *>(user);
-    if (!consumer)
-    {
-        return {{"status", "error"}, {"message", "User is not a consumer"}};
-    }
+    int userId = user->getId();
 
     switch (operation)
     {
-    case static_cast<int>(OrderOp::ViewPending): // 查看待支付订单
+    case static_cast<int>(OrderOp::ViewPending):
     {
-        auto &orders = consumer->getOrders();
+        auto orders = _orderManager.getOrders(userId);
         json result = json::array();
-        for (size_t i = 0; i < orders.size(); ++i)
+        for (const auto &order : orders)
         {
+            std::string statusStr = (order.getStatus() == Order::PENDING) ? "pending"
+                                    : (order.getStatus() == Order::PAID)  ? "paid"
+                                                                          : "cancelled";
             json orderInfo = {
-                {"orderIndex", i},
-                {"total", orders[i]->getTotalAmount()},
-                {"status", orders[i]->getStatus() == Order::PENDING ? "pending" : orders[i]->getStatus() == Order::PAID ? "paid"
-                                                                                                                        : "cancelled"},
+                {"orderId", order.getId()},
+                {"total", order.getTotalAmount()},
+                {"status", statusStr},
+                {"createdAt", order.getCreatedAt()},
                 {"items", json::array()}};
 
-            for (const auto &item : orders[i]->getItems())
+            for (const auto &item : order.getItems())
             {
-                orderInfo["items"].push_back({{"name", item.first->getName()},
-                                              {"quantity", item.second},
-                                              {"price", item.first->getPrice()}});
+                orderInfo["items"].push_back({{"name", item.commodityName},
+                                              {"quantity", item.quantity},
+                                              {"price", item.unitPrice}});
             }
-
             result.push_back(orderInfo);
         }
         return {{"status", "success"}, {"orders", result}};
     }
 
-    case static_cast<int>(OrderOp::Pay): // 支付订单
+    case static_cast<int>(OrderOp::Pay):
     {
-        size_t orderIndex = request["orderIndex"];
-        auto &orders = consumer->getOrders();
-        if (orderIndex >= orders.size())
+        int orderId = request["orderId"];
+        std::string errorMsg;
+        if (_orderManager.payOrder(userId, orderId, errorMsg))
         {
-            return {{"status", "error"}, {"message", "订单不存在"}};
-        }
-
-        if (orders[orderIndex]->pay(consumer, &_userManager))
-        {
-            _userManager.markDirty();
-            _commodityManager.markDirty();
-            orders.erase(orders.begin() + orderIndex); // unique_ptr 自动释放订单
             return {{"status", "success"}};
         }
         else
         {
-            return {{"status", "error"}, {"message", "Payment failed"}};
+            return {{"status", "error"}, {"message", errorMsg}};
         }
     }
 
-    case static_cast<int>(OrderOp::Cancel): // 取消订单
+    case static_cast<int>(OrderOp::Cancel):
     {
-        size_t orderIndex = request["orderIndex"];
-        auto &orders = consumer->getOrders();
-        if (orderIndex >= orders.size())
+        int orderId = request["orderId"];
+        std::string errorMsg;
+        if (_orderManager.cancelOrder(userId, orderId, errorMsg))
         {
-            return {{"status", "error"}, {"message", "订单不存在"}};
-        }
-
-        if (orders[orderIndex]->cancel())
-        {
-            _commodityManager.markDirty();
-            orders.erase(orders.begin() + orderIndex); // unique_ptr 自动释放订单
             return {{"status", "success"}};
         }
         else
         {
-            return {{"status", "error"}, {"message", "Cancel failed"}};
+            return {{"status", "error"}, {"message", errorMsg}};
         }
     }
 

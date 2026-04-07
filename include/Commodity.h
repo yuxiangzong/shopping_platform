@@ -5,109 +5,84 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
+#include <mutex>
+#include <sqlite3.h>
 
-// 商品基类，抽象类
 class Commodity
 {
 public:
-    Commodity(const std::string &name, const std::string &merchant, const std::string &description = "", double basePrice = 10.0, int storage = 0, double discount = 1.0)
-        : _name(name), _description(description), _merchant(merchant), _basePrice(basePrice), _discount(discount), _storage(storage) {}
-    virtual ~Commodity() = default;
+    Commodity(int id, const std::string &name, const std::string &type,
+              const std::string &merchant, const std::string &description,
+              double basePrice, int storage, double discount = 1.0)
+        : _id(id), _name(name), _type(type), _merchant(merchant),
+          _description(description), _basePrice(basePrice),
+          _discount(discount), _storage(storage) {}
 
-    std::string getName() const { return _name; }                      // 获取商品名
-    std::string getDescription() const { return _description; }        // 获取商品描述
-    std::string getMerchant() const { return _merchant; }              // 获取商家名
-    double getBasePrice() const { return _basePrice; }                 // 获取商品原价
-    virtual double getPrice() const { return _basePrice * _discount; } // 获取商品价格（原价*折扣）
-    double getDiscount() const { return _discount; }                   // 获取商品折扣
-    int getStorage() const { return _storage; }                        // 获取商品库存
-    virtual std::string getCommodityType() const = 0;                  // 获取商品类型
+    int getId() const { return _id; }
+    std::string getName() const { return _name; }
+    std::string getType() const { return _type; }
+    std::string getDescription() const { return _description; }
+    std::string getMerchant() const { return _merchant; }
+    double getBasePrice() const { return _basePrice; }
+    double getPrice() const { return _basePrice * _discount; }
+    double getDiscount() const { return _discount; }
+    int getStorage() const { return _storage; }
 
-    bool setBasePrice(double price);   // 设置商品原价
-    bool setDiscount(double discount); // 设置商品折扣（0~1）
-    bool setStorage(int storage);      // 设置商品库存
-    virtual void print() const;        // 打印商品信息
-protected:
-    std::string _name;        // 商品名
-    std::string _description; // 商品描述
-    std::string _merchant;    // 商家名
-    double _basePrice;        // 商品原价
-    double _discount;         // 商品折扣（0~1,1为原价）
-    int _storage;             // 商品库存
+    void setBasePrice(double price) { _basePrice = price; }
+    void setDiscount(double discount) { _discount = discount; }
+    void setStorage(int storage) { _storage = storage; }
+
+private:
+    int _id;
+    std::string _name;
+    std::string _type;
+    std::string _merchant;
+    std::string _description;
+    double _basePrice;
+    double _discount;
+    int _storage;
 };
 
-// 食物类，继承自商品基类
-class Food : public Commodity
-{
-public:
-    Food(const std::string &name, const std::string &merchant, const std::string &description = "", double price = 10.0, int storage = 0, double discount = 1.0)
-        : Commodity(name, merchant, description, price, storage, discount) {}
-
-    std::string getCommodityType() const override { return "Food"; }
-};
-
-// 服装类，继承自商品类基类
-class Clothes : public Commodity
-{
-public:
-    Clothes(const std::string &name, const std::string &merchant, const std::string &description = "", double price = 10.0, int storage = 0, double discount = 1.0)
-        : Commodity(name, merchant, description, price, storage, discount) {}
-
-    std::string getCommodityType() const override { return "Clothes"; }
-};
-
-// 图书类，继承自商品类基类
-class Book : public Commodity
-{
-public:
-    Book(const std::string &name, const std::string &merchant, const std::string &description = "", double price = 10.0, int storage = 0, double discount = 1.0)
-        : Commodity(name, merchant, description, price, storage, discount) {}
-
-    std::string getCommodityType() const override { return "Book"; }
-};
-
-// 电子商品类，继承自商品基类
-class Electronics : public Commodity
-{
-public:
-    Electronics(const std::string &name, const std::string &merchant, const std::string &description = "", double price = 10.0, int storage = 0, double discount = 1.0)
-        : Commodity(name, merchant, description, price, storage, discount) {}
-
-    std::string getCommodityType() const override { return "Electronics"; }
-};
-
-// 商品管理类，用于管理不同类型的商品
+// 商品管理类（按需缓存：查缓存未命中时从 DB 加载）
 class CommodityManager
 {
 public:
-    CommodityManager();
-    ~CommodityManager();
+    explicit CommodityManager(sqlite3 *db);
+    ~CommodityManager() = default;
     CommodityManager(const CommodityManager &) = delete;
     CommodityManager &operator=(const CommodityManager &) = delete;
 
-    bool loadCommodities();                                                                                                                                                                             // 加载商品数据
-    bool saveCommodities() const;
-    // 标记数据已被修改
-    void markDirty() { _dirty = true; }
-    // 检查数据是否被修改
-    bool isDirty() const { return _dirty; }                                                                                                                                                                       // 保存商品数据
-    bool addCommodity(const std::string &type, const std::string &name, const std::string &merchant, const std::string &description = "", double price = 10.0, int storage = 0, double discount = 1.0); // 添加商品
+    bool addCommodity(const std::string &type, const std::string &name,
+                      const std::string &merchant, const std::string &description = "",
+                      double price = 10.0, int storage = 0, double discount = 1.0);
 
-    // 显示商品信息
-    void showCommodities(const std::vector<Commodity *> &commodities) const;
-    // 搜索商品
-    std::vector<const Commodity *> findCommodity(const std::string &name = "") const;
-    // 获取特定商家的所有商品
-    std::vector<const Commodity *> getCommodityByMerchant(const std::string &merchantName) const;
-    // 获取特定商家的所有商品（可修改）
-    std::vector<Commodity *> getMutableCommodityByMerchant(const std::string &merchantName);
-    // 根据商品名获取商品（可修改），未找到返回nullptr
+    // 搜索商品（查 DB，结果加入缓存）
+    std::vector<const Commodity *> findCommodity(const std::string &name = "");
+    // 获取特定商家的所有商品（查 DB，结果加入缓存）
+    std::vector<const Commodity *> getCommodityByMerchant(const std::string &merchantName);
+    // 按名称查找（缓存优先）
     Commodity *getCommodityByName(const std::string &name);
+    // 按 ID 查找（缓存优先）
+    Commodity *getCommodityById(int id);
+
+    bool updatePrice(Commodity *commodity, double newPrice);
+    bool updateStock(Commodity *commodity, int newStock);
+    bool updateDiscount(Commodity *commodity, double newDiscount);
+    // 返回受影响的行数，-1 表示参数错误
+    int batchUpdateDiscount(const std::string &merchant, const std::string &type, double newDiscount);
 
 private:
-    std::unordered_map<std::string, std::unique_ptr<Commodity>> _nameMap;  // 商品名到商品的映射
-    std::string _filename = "./commodities.json";            // 商品数据存储文件名
-    mutable bool _dirty = false;                             // 数据是否被修改，用于避免无变更时写磁盘
+    sqlite3 *_db;
+    std::mutex _cacheMutex;
+    std::unordered_map<std::string, std::unique_ptr<Commodity>> _nameMap;
+    std::unordered_map<int, Commodity *> _idMap;
+
+    // 缓存操作（须持有 _cacheMutex）
+    Commodity *cacheCommodity(std::unique_ptr<Commodity> c);
+    // 按 name 从 DB 加载
+    Commodity *loadByName(const std::string &name);
+    // 按 id 从 DB 加载
+    Commodity *loadById(int id);
 };
 
 #endif
