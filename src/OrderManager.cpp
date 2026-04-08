@@ -441,6 +441,84 @@ bool OrderManager::payOrder(int userId, int orderId, std::string &errorMsg)
     return true;
 }
 
+bool OrderManager::cancelOrderInternal(int orderId)
+{
+    // 恢复库存
+    const char *itemSql = "SELECT commodity_id, quantity FROM order_items WHERE order_id = ?";
+    const char *restoreSql = "UPDATE commodities SET storage = storage + ? WHERE id = ?";
+    const char *updateSql = "UPDATE orders SET status = 'CANCELLED' WHERE id = ?";
+
+    sqlite3_stmt *itemStmt = nullptr, *restoreStmt = nullptr, *updateStmt = nullptr;
+    if (sqlite3_prepare_v2(_db, itemSql, -1, &itemStmt, nullptr) != SQLITE_OK ||
+        sqlite3_prepare_v2(_db, restoreSql, -1, &restoreStmt, nullptr) != SQLITE_OK ||
+        sqlite3_prepare_v2(_db, updateSql, -1, &updateStmt, nullptr) != SQLITE_OK)
+    {
+        sqlite3_finalize(itemStmt);
+        sqlite3_finalize(restoreStmt);
+        sqlite3_finalize(updateStmt);
+        return false;
+    }
+
+    // 恢复库存
+    sqlite3_bind_int(itemStmt, 1, orderId);
+    while (sqlite3_step(itemStmt) == SQLITE_ROW)
+    {
+        int commodityId = sqlite3_column_int(itemStmt, 0);
+        int quantity = sqlite3_column_int(itemStmt, 1);
+
+        sqlite3_bind_int(restoreStmt, 1, quantity);
+        sqlite3_bind_int(restoreStmt, 2, commodityId);
+        sqlite3_step(restoreStmt);
+        sqlite3_reset(restoreStmt);
+
+        // 同步缓存
+        Commodity *c = _commodityManager.getCommodityById(commodityId);
+        if (c)
+            c->setStorage(c->getStorage() + quantity);
+    }
+    sqlite3_finalize(itemStmt);
+    sqlite3_finalize(restoreStmt);
+
+    // 更新订单状态
+    sqlite3_bind_int(updateStmt, 1, orderId);
+    sqlite3_step(updateStmt);
+    sqlite3_finalize(updateStmt);
+
+    return true;
+}
+
+int OrderManager::cancelExpiredOrders(int timeoutMinutes)
+{
+    // 查找所有超时的 PENDING 订单
+    const char *findSql = "SELECT id FROM orders "
+                          "WHERE status = 'PENDING' "
+                          "AND created_at < datetime('now', '-' || ? || ' minutes')";
+    sqlite3_stmt *findStmt;
+    if (sqlite3_prepare_v2(_db, findSql, -1, &findStmt, nullptr) != SQLITE_OK)
+        return 0;
+
+    sqlite3_bind_int(findStmt, 1, timeoutMinutes);
+
+    std::vector<int> expiredIds;
+    while (sqlite3_step(findStmt) == SQLITE_ROW)
+        expiredIds.push_back(sqlite3_column_int(findStmt, 0));
+    sqlite3_finalize(findStmt);
+
+    if (expiredIds.empty())
+        return 0;
+
+    sqlite3_exec(_db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
+
+    for (int orderId : expiredIds)
+    {
+        if (cancelOrderInternal(orderId))
+            std::cout << "订单 " << orderId << " 已自动取消（超时未支付）" << '\n';
+    }
+
+    sqlite3_exec(_db, "COMMIT;", nullptr, nullptr, nullptr);
+    return static_cast<int>(expiredIds.size());
+}
+
 bool OrderManager::cancelOrder(int userId, int orderId, std::string &errorMsg)
 {
     // 获取订单状态
@@ -471,43 +549,7 @@ bool OrderManager::cancelOrder(int userId, int orderId, std::string &errorMsg)
     }
 
     sqlite3_exec(_db, "BEGIN TRANSACTION;", nullptr, nullptr, nullptr);
-
-    // 恢复库存
-    const char *itemSql = "SELECT commodity_id, quantity FROM order_items WHERE order_id = ?";
-    sqlite3_stmt *itemStmt;
-    sqlite3_prepare_v2(_db, itemSql, -1, &itemStmt, nullptr);
-    sqlite3_bind_int(itemStmt, 1, orderId);
-
-    const char *restoreSql = "UPDATE commodities SET storage = storage + ? WHERE id = ?";
-    sqlite3_stmt *restoreStmt;
-    sqlite3_prepare_v2(_db, restoreSql, -1, &restoreStmt, nullptr);
-
-    while (sqlite3_step(itemStmt) == SQLITE_ROW)
-    {
-        int commodityId = sqlite3_column_int(itemStmt, 0);
-        int quantity = sqlite3_column_int(itemStmt, 1);
-
-        sqlite3_bind_int(restoreStmt, 1, quantity);
-        sqlite3_bind_int(restoreStmt, 2, commodityId);
-        sqlite3_step(restoreStmt);
-        sqlite3_reset(restoreStmt);
-
-        // 同步缓存
-        Commodity *c = _commodityManager.getCommodityById(commodityId);
-        if (c)
-            c->setStorage(c->getStorage() + quantity);
-    }
-    sqlite3_finalize(itemStmt);
-    sqlite3_finalize(restoreStmt);
-
-    // 更新订单状态
-    const char *updateSql = "UPDATE orders SET status = 'CANCELLED' WHERE id = ?";
-    sqlite3_stmt *updateStmt;
-    sqlite3_prepare_v2(_db, updateSql, -1, &updateStmt, nullptr);
-    sqlite3_bind_int(updateStmt, 1, orderId);
-    sqlite3_step(updateStmt);
-    sqlite3_finalize(updateStmt);
-
+    cancelOrderInternal(orderId);
     sqlite3_exec(_db, "COMMIT;", nullptr, nullptr, nullptr);
     return true;
 }

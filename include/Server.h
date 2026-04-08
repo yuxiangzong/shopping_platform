@@ -40,6 +40,12 @@ private:
     std::atomic<bool> _stop{false};
     std::shared_mutex _dataMutex;
 
+    // 订单超时取消定时线程
+    std::thread _expiryThread;
+    std::condition_variable _expiryCv;
+    std::mutex _expiryMutex;
+    void expiryCheckLoop();
+
     void handleConnection(int socket);
 
     json handleLogin(const json &request);

@@ -94,17 +94,41 @@ Server::Server(int port)
             } });
     }
     std::cout << "Thread pool started with " << numThreads << " workers." << '\n';
+
+    // 启动订单超时检查线程
+    _expiryThread = std::thread(&Server::expiryCheckLoop, this);
 }
 
 Server::~Server()
 {
     _stop = true;
     _cv.notify_all();
+    _expiryCv.notify_all();
     for (auto &worker : _workers)
     {
         if (worker.joinable())
             worker.join();
     }
+    if (_expiryThread.joinable())
+        _expiryThread.join();
+}
+
+void Server::expiryCheckLoop()
+{
+    std::cout << "Order expiry checker started (30 min timeout, checking every 60s)." << '\n';
+    while (!_stop)
+    {
+        std::unique_lock<std::mutex> lock(_expiryMutex);
+        if (_expiryCv.wait_for(lock, std::chrono::seconds(60), [this] { return _stop.load(); }))
+            break;
+
+        // 加写锁执行取消操作
+        std::unique_lock<std::shared_mutex> dataLock(_dataMutex);
+        int count = _orderManager.cancelExpiredOrders(30);
+        if (count > 0)
+            std::cout << "Auto-cancelled " << count << " expired order(s)." << '\n';
+    }
+    std::cout << "Order expiry checker stopped." << '\n';
 }
 
 void Server::handleConnection(int clientSocket)

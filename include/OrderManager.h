@@ -36,11 +36,16 @@ public:
     bool payOrder(int userId, int orderId, std::string &errorMsg);
     // 取消订单
     bool cancelOrder(int userId, int orderId, std::string &errorMsg);
+    // 自动取消超时未支付的订单（由后台定时线程调用）
+    int cancelExpiredOrders(int timeoutMinutes = 30);
 
 private:
     sqlite3 *_db;
     UserManager &_userManager;
     CommodityManager &_commodityManager;
+
+    // 内部取消订单（恢复库存 + 更新状态），调用者需持有 _dataMutex 写锁
+    bool cancelOrderInternal(int orderId);
 };
 
 #endif
