@@ -6,36 +6,98 @@
 Client::Client(const std::string &serverIp, int port)
     : _serverIp(serverIp), _port(port) {}
 
-json Client::sendRequest(const json &request) const
+Client::~Client()
 {
-    int sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-    if (sock < 0)
-        throw std::runtime_error("Socket creation error");
+    if (_sock >= 0)
+        close(_sock);
+}
 
-    struct sockaddr_in serv_addr;
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_port = htons(_port);
-
-    if (inet_pton(AF_INET, _serverIp.c_str(), &serv_addr.sin_addr) <= 0)
+json Client::sendRequest(const json &request)
+{
+    if (_sock < 0)
     {
-        close(sock);
-        throw std::runtime_error("Invalid address/ Address not supported");
+        _sock = ::socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+        if (_sock < 0)
+            throw std::runtime_error("Socket creation error");
+
+        struct sockaddr_in serv_addr{};
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(_port);
+
+        if (inet_pton(AF_INET, _serverIp.c_str(), &serv_addr.sin_addr) <= 0)
+        {
+            close(_sock);
+            _sock = -1;
+            throw std::runtime_error("Invalid address/ Address not supported");
+        }
+
+        if (::connect(_sock, reinterpret_cast<struct sockaddr *>(&serv_addr), sizeof(serv_addr)) < 0)
+        {
+            close(_sock);
+            _sock = -1;
+            throw std::runtime_error("Connection Failed");
+        }
+
+        struct timeval timeout{.tv_sec = 10, .tv_usec = 0};
+        setsockopt(_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     }
 
-    if (::connect(sock, reinterpret_cast<struct sockaddr *>(&serv_addr), sizeof(serv_addr)) < 0)
+    try
     {
-        close(sock);
-        throw std::runtime_error("Connection Failed");
+        sendJson(_sock, request);
+        return recvJson(_sock);
     }
+    catch (...)
+    {
+        close(_sock);
+        _sock = -1;
+        throw;
+    }
+}
 
-    // 设置接收超时（10秒），防止服务端无响应时永久阻塞
-    struct timeval timeout{.tv_sec = 10, .tv_usec = 0};
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+void Client::viewBalance(const json &request)
+{
+    json response = sendRequest(request);
+    if (response["status"] == "success")
+        std::cout << "\n当前余额: " << response["balance"] << '\n';
+    else
+        std::cout << "获取余额失败: " << response["message"] << '\n';
+}
 
-    sendJson(sock, request);
-    json response = recvJson(sock);
-    close(sock);
-    return response;
+void Client::recharge(json &request)
+{
+    double amount;
+    std::cout << "请输入充值金额: ";
+    std::cin >> amount;
+    if (std::cin.fail())
+    {
+        std::cin.clear();
+        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        std::cerr << "输入不合法" << '\n';
+        return;
+    }
+    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    request["amount"] = amount;
+
+    json response = sendRequest(request);
+    if (response["status"] == "success")
+        std::cout << "充值成功，当前余额: " << response["balance"] << '\n';
+    else
+        std::cout << "充值失败: " << response["message"] << '\n';
+}
+
+void Client::changePassword(json &request)
+{
+    std::string newPassword;
+    std::cout << "请输入新密码: ";
+    std::getline(std::cin, newPassword);
+    request["newPassword"] = newPassword;
+
+    json response = sendRequest(request);
+    if (response["status"] == "success")
+        std::cout << "密码设置成功" << '\n';
+    else
+        std::cout << "密码设置失败: " << response["message"] << '\n';
 }
 
 void Client::printCommodities(const json &response)
@@ -73,7 +135,7 @@ void Client::printCartItems(const json &response)
     {
         std::cout << item["name"] << " x" << item["quantity"]
                   << " 单价:" << item["price"]
-                  << " 小计:" << item["price"].get<double>() * item["quantity"].get<int>() << '\n';
+                  << " 小计:" << item["subtotal"] << '\n';
     }
     std::cout << "总计: " << response["total"] << '\n';
 }
@@ -90,7 +152,7 @@ void Client::printOrderItems(const json &order)
     std::cout << "总金额: " << order["total"] << "\n";
 }
 
-void Client::showMainMenu() const
+void Client::showMainMenu()
 {
     std::cout << "\n***** 电商交易平台客户端 *****\n";
     std::cout << "1. 注册\n";
@@ -101,7 +163,7 @@ void Client::showMainMenu() const
     std::cout << "请选择: ";
 }
 
-void Client::showMerchantMenu(const std::string &username) const
+void Client::showMerchantMenu(const std::string &username)
 {
     while (true)
     {
@@ -134,44 +196,11 @@ void Client::showMerchantMenu(const std::string &username) const
         case 0:
             return;
         case 1:
-        {
-            json response = sendRequest(request);
-            if (response["status"] == "success")
-            {
-                std::cout << "\n当前余额: " << response["balance"] << '\n';
-            }
-            else
-            {
-                std::cout << "获取余额失败: " << response["message"] << '\n';
-            }
+            viewBalance(request);
             break;
-        }
         case 2:
-        {
-            double amount;
-            std::cout << "请输入充值金额: ";
-            std::cin >> amount;
-            if (std::cin.fail())
-            {
-                std::cin.clear();
-                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                std::cerr << "输入不合法" << '\n';
-                break;
-            }
-            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-            request["amount"] = amount;
-
-            json response = sendRequest(request);
-            if (response["status"] == "success")
-            {
-                std::cout << "充值成功，当前余额: " << response["balance"] << '\n';
-            }
-            else
-            {
-                std::cout << "充值失败: " << response["message"] << '\n';
-            }
+            recharge(request);
             break;
-        }
         case 3:
         {
             std::cout << "请输入商品类型ID(1: Food, 2: Clothes, 3: Book, 4: Electronics): ";
@@ -186,22 +215,8 @@ void Client::showMerchantMenu(const std::string &username) const
             }
             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
-            std::string type, name, description;
-            switch (typeID)
-            {
-            case 1:
-                type = "Food";
-                break;
-            case 2:
-                type = "Clothes";
-                break;
-            case 3:
-                type = "Book";
-                break;
-            case 4:
-                type = "Electronics";
-                break;
-            }
+            static const char *types[] = {"", "Food", "Clothes", "Book", "Electronics"};
+            std::string type = types[typeID], name, description;
 
             std::cout << "请输入商品名称: ";
             std::getline(std::cin >> std::ws, name);
@@ -379,36 +394,24 @@ void Client::showMerchantMenu(const std::string &username) const
                         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
 
                         if (discountChoice == 1)
-                        {
-                            double newDiscount;
                             std::cout << "当前折扣: " << selected["discount"] << '\n';
-                            std::cout << "输入新折扣(0-1): ";
-                            std::cin >> newDiscount;
-                            if (std::cin.fail())
-                            {
-                                std::cin.clear();
-                                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                                std::cerr << "无效的输入" << '\n';
-                                continue;
-                            }
-                            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                            modifyRequest["newDiscount"] = newDiscount;
-                        }
                         else
-                        {
-                            double newDiscount;
                             std::cout << "当前商品类型: " << selected["type"] << '\n';
-                            std::cout << "输入新折扣(0-1): ";
-                            std::cin >> newDiscount;
-                            if (std::cin.fail())
-                            {
-                                std::cin.clear();
-                                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                                std::cerr << "无效的输入" << '\n';
-                                continue;
-                            }
+
+                        double newDiscount;
+                        std::cout << "输入新折扣(0-1): ";
+                        std::cin >> newDiscount;
+                        if (std::cin.fail())
+                        {
+                            std::cin.clear();
                             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                            modifyRequest["newDiscount"] = newDiscount;
+                            std::cerr << "无效的输入" << '\n';
+                            continue;
+                        }
+                        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                        modifyRequest["newDiscount"] = newDiscount;
+                        if (discountChoice == 2)
+                        {
                             modifyRequest["commodityType"] = selected["type"];
                             modifyRequest["operation"] = static_cast<int>(MerchantOp::BatchModifyDiscount);
                         }
@@ -432,23 +435,8 @@ void Client::showMerchantMenu(const std::string &username) const
             break;
         }
         case 5:
-        {
-            std::string newPassword;
-            std::cout << "请输入新密码: ";
-            std::getline(std::cin, newPassword);
-            request["newPassword"] = newPassword;
-
-            json response = sendRequest(request);
-            if (response["status"] == "success")
-            {
-                std::cout << "密码设置成功" << '\n';
-            }
-            else
-            {
-                std::cout << "密码设置失败: " << response["message"] << '\n';
-            }
+            changePassword(request);
             break;
-        }
         default:
             std::cerr << "无效的选项" << '\n';
             break;
@@ -456,7 +444,7 @@ void Client::showMerchantMenu(const std::string &username) const
     }
 }
 
-void Client::showCartMenu(const std::string &username) const
+void Client::showCartMenu(const std::string &username)
 {
     while (true)
     {
@@ -654,31 +642,17 @@ void Client::showCartMenu(const std::string &username) const
             char confirm;
             std::cin >> confirm;
             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-            if (confirm == 'y' || confirm == 'Y')
+            bool immediatePayment = (confirm == 'y' || confirm == 'Y');
+            cartRequest["immediatePayment"] = immediatePayment;
+            json response = sendRequest(cartRequest);
+            if (response["status"] == "success")
             {
-                cartRequest["immediatePayment"] = true;
-                json response = sendRequest(cartRequest);
-                if (response["status"] == "success")
-                {
-                    std::cout << "支付成功!" << '\n';
-                }
-                else
-                {
-                    std::cout << "支付失败: " << response["message"] << '\n';
-                }
+                std::cout << (immediatePayment ? "支付成功!" : "订单已生成，等待支付") << '\n';
             }
             else
             {
-                cartRequest["immediatePayment"] = false;
-                json response = sendRequest(cartRequest);
-                if (response["status"] == "success")
-                {
-                    std::cout << "订单已生成，等待支付" << '\n';
-                }
-                else
-                {
-                    std::cout << "订单生成失败: " << response["message"] << '\n';
-                }
+                std::cout << (immediatePayment ? "支付失败: " : "订单生成失败: ")
+                          << response["message"] << '\n';
             }
             break;
         }
@@ -689,7 +663,7 @@ void Client::showCartMenu(const std::string &username) const
     }
 }
 
-void Client::showConsumerMenu(const std::string &username) const
+void Client::showConsumerMenu(const std::string &username)
 {
     while (true)
     {
@@ -724,44 +698,11 @@ void Client::showConsumerMenu(const std::string &username) const
         case 0:
             return;
         case 1:
-        {
-            json response = sendRequest(request);
-            if (response["status"] == "success")
-            {
-                std::cout << "\n当前余额: " << response["balance"] << '\n';
-            }
-            else
-            {
-                std::cout << "获取余额失败: " << response["message"] << '\n';
-            }
+            viewBalance(request);
             break;
-        }
         case 2:
-        {
-            double amount;
-            std::cout << "请输入充值金额: ";
-            std::cin >> amount;
-            if (std::cin.fail())
-            {
-                std::cin.clear();
-                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                std::cerr << "输入不合法" << '\n';
-                break;
-            }
-            std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-            request["amount"] = amount;
-
-            json response = sendRequest(request);
-            if (response["status"] == "success")
-            {
-                std::cout << "充值成功，当前余额: " << response["balance"] << '\n';
-            }
-            else
-            {
-                std::cout << "充值失败: " << response["message"] << '\n';
-            }
+            recharge(request);
             break;
-        }
         case 3:
         {
             json response = sendRequest(request);
@@ -780,23 +721,8 @@ void Client::showConsumerMenu(const std::string &username) const
             break;
         }
         case 5:
-        {
-            std::string newPassword;
-            std::cout << "请输入新密码: ";
-            std::getline(std::cin, newPassword);
-            request["newPassword"] = newPassword;
-
-            json response = sendRequest(request);
-            if (response["status"] == "success")
-            {
-                std::cout << "密码设置成功" << '\n';
-            }
-            else
-            {
-                std::cout << "密码设置失败: " << response["message"] << '\n';
-            }
+            changePassword(request);
             break;
-        }
         case 6:
             showCartMenu(username);
             break;
@@ -868,26 +794,13 @@ void Client::showConsumerMenu(const std::string &username) const
                     {"orderId", order["orderId"]},
                     {"operation", action}};
 
-                if (action == 1)
-                {
-                    json payResponse = sendRequest(orderRequest);
-                    if (payResponse["status"] == "success")
-                        std::cout << "支付成功\n";
-                    else
-                        std::cout << "支付失败: " << payResponse["message"] << "\n";
-                }
-                else if (action == 2)
-                {
-                    json cancelResponse = sendRequest(orderRequest);
-                    if (cancelResponse["status"] == "success")
-                        std::cout << "订单已取消\n";
-                    else
-                        std::cout << "取消失败: " << cancelResponse["message"] << "\n";
-                }
+                static const char *successMsg[] = {"", "支付成功", "订单已取消"};
+                static const char *failPrefix[] = {"", "支付失败: ", "取消失败: "};
+                json orderResponse = sendRequest(orderRequest);
+                if (orderResponse["status"] == "success")
+                    std::cout << successMsg[action] << "\n";
                 else
-                {
-                    std::cerr << "无效操作\n";
-                }
+                    std::cout << failPrefix[action] << orderResponse["message"] << "\n";
             }
 
             break;

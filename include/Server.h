@@ -1,6 +1,7 @@
 #ifndef SERVER_H
 #define SERVER_H
 
+#include <sys/epoll.h>
 #include <vector>
 #include <queue>
 #include <unordered_map>
@@ -25,6 +26,8 @@ public:
 
 private:
     int _port;
+    int _epollFd{-1};
+    int _serverFd{-1};
     Database _db;
     UserManager _userManager;
     CommodityManager _commodityManager;
@@ -40,13 +43,14 @@ private:
     std::atomic<bool> _stop{false};
     std::shared_mutex _dataMutex;
 
+    // epoll
+    void runEpoll();
+
     // 订单超时取消定时线程
     std::thread _expiryThread;
     std::condition_variable _expiryCv;
     std::mutex _expiryMutex;
     void expiryCheckLoop();
-
-    void handleConnection(int socket);
 
     json handleLogin(const json &request);
     json handleRegister(const json &request);

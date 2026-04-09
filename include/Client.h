@@ -8,21 +8,26 @@ class Client
 {
 public:
     Client(const std::string &serverIp, int port);
+    ~Client();
 
-    json sendRequest(const json &request) const;
-    void showMainMenu() const;
-    void showMerchantMenu(const std::string &username) const;
-    void showConsumerMenu(const std::string &username) const;
+    json sendRequest(const json &request);
+    void showMainMenu();
+    void showMerchantMenu(const std::string &username);
+    void showConsumerMenu(const std::string &username);
 
     static void printCommodities(const json &response);
     static void printCartItems(const json &response);
     static void printOrderItems(const json &order);
 
-    void showCartMenu(const std::string &username) const;
+    void showCartMenu(const std::string &username);
 
 private:
-    std::string _serverIp; // 服务器IP地址
-    int _port;             // 服务器端口号
+    void viewBalance(const json &request);
+    void recharge(json &request);
+    void changePassword(json &request);
+    std::string _serverIp;
+    int _port;
+    int _sock{-1};
 };
 
 #endif

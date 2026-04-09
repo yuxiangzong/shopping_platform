@@ -49,6 +49,7 @@ bool Server::isReadOnly(const std::string &action, const json &request) const
 
 Server::Server(int port)
     : _port(port),
+      _epollFd(epoll_create1(0)),
       _db("./shopping.db"),
       _userManager(_db.handle()),
       _commodityManager(_db.handle()),
@@ -111,6 +112,10 @@ Server::~Server()
     }
     if (_expiryThread.joinable())
         _expiryThread.join();
+    if (_epollFd >= 0)
+        close(_epollFd);
+    if (_serverFd >= 0)
+        close(_serverFd);
 }
 
 void Server::expiryCheckLoop()
@@ -131,66 +136,101 @@ void Server::expiryCheckLoop()
     std::cout << "Order expiry checker stopped." << '\n';
 }
 
-void Server::handleConnection(int clientSocket)
+void Server::runEpoll()
 {
-    try
+    constexpr int MAX_EVENTS = 64;
+    epoll_event events[MAX_EVENTS];
+
+    while (!_stop)
     {
-        json request = recvJson(clientSocket);
-        std::string action = request["action"];
-
-        json response;
-        bool readOnly = isReadOnly(action, request);
-
-        if (readOnly)
+        int n = epoll_wait(_epollFd, events, MAX_EVENTS, 1000);
+        for (int i = 0; i < n; ++i)
         {
-            std::shared_lock<std::shared_mutex> lock(_dataMutex);
-            auto it = _handlers.find(action);
-            response = (it != _handlers.end())
-                           ? it->second(request)
-                           : json({{"status", "error"}, {"message", "Unknown action"}});
-        }
-        else
-        {
-            std::unique_lock<std::shared_mutex> lock(_dataMutex);
-            auto it = _handlers.find(action);
-            response = (it != _handlers.end())
-                           ? it->second(request)
-                           : json({{"status", "error"}, {"message", "Unknown action"}});
-        }
+            int fd = events[i].data.fd;
 
-        sendJson(clientSocket, response);
+            if (fd == _serverFd)
+            {
+                // 新连接
+                struct sockaddr_in addr;
+                socklen_t len = sizeof(addr);
+                int clientFd = accept(_serverFd, (struct sockaddr *)&addr, &len);
+                if (clientFd < 0)
+                    continue;
+
+                struct timeval timeout{.tv_sec = 30, .tv_usec = 0};
+                setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+                epoll_event ev{};
+                ev.events = EPOLLIN | EPOLLONESHOT;
+                ev.data.fd = clientFd;
+                epoll_ctl(_epollFd, EPOLL_CTL_ADD, clientFd, &ev);
+            }
+            else
+            {
+                // 客户端请求，丢入线程池
+                int clientFd = fd;
+                {
+                    std::lock_guard<std::mutex> lock(_queueMutex);
+                    _tasks.emplace([this, clientFd]()
+                    {
+                        try
+                        {
+                            json request = recvJson(clientFd);
+                            std::string action = request["action"];
+                            json response;
+                            bool readOnly = isReadOnly(action, request);
+                            auto it = _handlers.find(action);
+                            if (it == _handlers.end())
+                            {
+                                response = {{"status", "error"}, {"message", "Unknown action"}};
+                            }
+                            else if (readOnly)
+                            {
+                                std::shared_lock<std::shared_mutex> lock(_dataMutex);
+                                response = it->second(request);
+                            }
+                            else
+                            {
+                                std::unique_lock<std::shared_mutex> lock(_dataMutex);
+                                response = it->second(request);
+                            }
+
+                            sendJson(clientFd, response);
+
+                            // re-arm epoll
+                            epoll_event ev{};
+                            ev.events = EPOLLIN | EPOLLONESHOT;
+                            ev.data.fd = clientFd;
+                            epoll_ctl(_epollFd, EPOLL_CTL_MOD, clientFd, &ev);
+                        }
+                        catch (...)
+                        {
+                            close(clientFd); // 自动从 epoll 移除
+                        } });
+                }
+                _cv.notify_one();
+            }
+        }
     }
-    catch (const std::exception &e)
-    {
-        try
-        {
-            sendJson(clientSocket, {{"status", "error"}, {"message", e.what()}});
-        }
-        catch (...)
-        {
-        }
-    }
-
-    close(clientSocket);
 }
 
 void Server::start()
 {
-    int server_fd, new_socket;
-
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_IP)) == 0)
+    if ((_serverFd = socket(AF_INET, SOCK_STREAM, IPPROTO_IP)) == 0)
     {
         perror("socket failed");
         exit(EXIT_FAILURE);
     }
 
-    struct sockaddr_in address;
-    socklen_t addrlen = sizeof(address);
+    int opt = 1;
+    setsockopt(_serverFd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    struct sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(_port);
 
-    if (bind(server_fd, (struct sockaddr *)&address, addrlen) < 0)
+    if (bind(_serverFd, (struct sockaddr *)&address, sizeof(address)) < 0)
     {
         perror("bind failed");
         exit(EXIT_FAILURE);
@@ -198,32 +238,19 @@ void Server::start()
 
     signal(SIGPIPE, SIG_IGN);
 
-    if (listen(server_fd, SOMAXCONN) < 0)
+    if (listen(_serverFd, SOMAXCONN) < 0)
     {
         perror("listen");
         exit(EXIT_FAILURE);
     }
 
+    epoll_event ev{};
+    ev.events = EPOLLIN;
+    ev.data.fd = _serverFd;
+    epoll_ctl(_epollFd, EPOLL_CTL_ADD, _serverFd, &ev);
+
     std::cout << "Server started on port " << _port << '\n';
-
-    while (true)
-    {
-        if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t *)&addrlen)) < 0)
-        {
-            perror("accept");
-            continue;
-        }
-
-        struct timeval timeout{.tv_sec = 30, .tv_usec = 0};
-        setsockopt(new_socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
-        {
-            std::lock_guard<std::mutex> lock(_queueMutex);
-            _tasks.emplace([this, new_socket]()
-                           { handleConnection(new_socket); });
-        }
-        _cv.notify_one();
-    }
+    runEpoll();
 }
 
 json Server::handleLogin(const json &request)
